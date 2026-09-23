@@ -1,0 +1,88 @@
+:root {
+  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.45;
+  color: #e8edf2;
+  background: #0f1419;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.status-page {
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: 4rem 1.5rem;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+h2 {
+  margin: 0 0 1.5rem;
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: #8b98a5;
+}
+
+.status-note {
+  margin: 0 0 1.5rem;
+  color: #8b98a5;
+  font-size: 0.9rem;
+}
+
+.status-list {
+  margin: 0;
+  padding: 1rem 1.25rem;
+  border: 1px solid #2d3a4d;
+  border-radius: 8px;
+  background: #1a2332;
+}
+
+.status-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0;
+}
+
+.status-list > div + div {
+  border-top: 1px solid #2d3a4d;
+}
+
+dt {
+  margin: 0;
+  color: #8b98a5;
+}
+
+dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+dd[data-state='connected'] {
+  color: #3dd68c;
+}
+
+dd[data-state='unavailable'] {
+  color: #f07178;
+}
+
+dd[data-state='loading'] {
+  color: #e6c07b;
+}

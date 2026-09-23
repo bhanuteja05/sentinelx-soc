@@ -26,13 +26,15 @@ See:
 
 ## Local stack (current)
 
-PostgreSQL and the FastAPI backend can be started with:
+PostgreSQL, the FastAPI backend, and the React frontend can be started with:
 
 ```bash
-docker compose up -d --build db backend
+docker compose up -d --build
 ```
 
+- Frontend: http://127.0.0.1:5173
 - Health: http://127.0.0.1:8000/health
 - API health: http://127.0.0.1:8000/api/v1/health
+- Database health: http://127.0.0.1:8000/api/v1/health/db
 - OpenAPI docs: http://127.0.0.1:8000/docs
 - PostgreSQL: 127.0.0.1:5433
