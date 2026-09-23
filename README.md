@@ -23,3 +23,16 @@ See:
 
 - [Architecture overview](docs/architecture/overview.md)
 - [Development environment](docs/setup/development-environment.md)
+
+## Local stack (current)
+
+PostgreSQL and the FastAPI backend can be started with:
+
+```bash
+docker compose up -d --build db backend
+```
+
+- Health: http://127.0.0.1:8000/health
+- API health: http://127.0.0.1:8000/api/v1/health
+- OpenAPI docs: http://127.0.0.1:8000/docs
+- PostgreSQL: 127.0.0.1:5433
