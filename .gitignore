@@ -85,6 +85,11 @@ docker-compose.override.yaml
 docker-compose.local.yml
 docker-compose.local.yaml
 
+# Wazuh generated TLS (keep README)
+infrastructure/wazuh/config/wazuh_indexer_ssl_certs/*.pem
+infrastructure/wazuh/config/wazuh_indexer_ssl_certs/*.key
+infrastructure/wazuh/config/wazuh_indexer_ssl_certs/*.csr
+
 # VS Code / Cursor
 .vscode/
 .vscode-test/

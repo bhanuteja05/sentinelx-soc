@@ -38,3 +38,12 @@ docker compose up -d --build
 - Database health: http://127.0.0.1:8000/api/v1/health/db
 - OpenAPI docs: http://127.0.0.1:8000/docs
 - PostgreSQL: 127.0.0.1:5433
+
+Wazuh (SIEM) is a **separate** Compose project. It does not start with the command above.
+
+```bash
+docker compose -f infrastructure/wazuh/docker-compose.yml --env-file .env --profile wazuh up -d
+```
+
+- Wazuh dashboard: https://127.0.0.1:8443
+- See [infrastructure/wazuh/README.md](infrastructure/wazuh/README.md)

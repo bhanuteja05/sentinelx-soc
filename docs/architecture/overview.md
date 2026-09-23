@@ -1,6 +1,18 @@
 # SentinelX architecture overview
 
-High-level data flow for the planned SOC lab. Nothing in this diagram is implemented in the current milestone.
+High-level data flow. Wazuh central components (indexer, manager, dashboard) run as an isolated Docker stack on `sentinelx-siem`. Agents and network sensors are not deployed yet.
+
+```
+Windows / Sysmon  ──┐
+                    ├──► Wazuh ──► alerts
+Linux / Auditd    ──┘
+
+Zeek + Suricata ──► network telemetry
+
+Wazuh alerts ──► SentinelX backend ──► investigation / application data ──► PostgreSQL
+
+React dashboard ──► analyst interface (reads/writes via the backend)
+```
 
 ```
 Windows / Sysmon  ──┐

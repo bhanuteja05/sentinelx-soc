@@ -1,3 +1,6 @@
+# Application stack only (db, backend, frontend).
+# Wazuh is isolated: infrastructure/wazuh/docker-compose.yml
+#   docker compose -f infrastructure/wazuh/docker-compose.yml --env-file .env --profile wazuh up -d
 services:
   db:
     image: postgres:17

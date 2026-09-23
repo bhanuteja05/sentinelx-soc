@@ -1,0 +1,12 @@
+# Official Wazuh cert generator (one-shot). Not a long-running service.
+# docker compose -f infrastructure/wazuh/generate-indexer-certs.yml run --rm generator
+
+services:
+  generator:
+    image: wazuh/wazuh-certs-generator:0.0.4
+    hostname: wazuh-certs-generator
+    environment:
+      CERT_TOOL_VERSION: "4.14"
+    volumes:
+      - ./config/wazuh_indexer_ssl_certs/:/certificates/
+      - ./config/certs.yml:/config/certs.yml:ro
