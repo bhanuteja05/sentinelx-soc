@@ -145,7 +145,11 @@ services:
       start_period: 120s
 
 networks:
+  # sentinelx-siem is created by the root docker-compose.yml (app stack).
+  # This compose joins it as an external consumer. Start the app stack first
+  # (docker compose up -d) to ensure the network exists before starting Wazuh.
   sentinelx-siem:
+    external: true
     name: sentinelx-siem
 
 volumes:

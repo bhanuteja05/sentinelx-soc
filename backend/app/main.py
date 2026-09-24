@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 
 from app.db import check_database
+from app.wazuh.routes import router as wazuh_router
 
 app = FastAPI(
     title="SentinelX",
@@ -24,5 +25,12 @@ def api_v1_health_db() -> dict[str, str]:
     try:
         check_database()
     except Exception:
-        raise HTTPException(status_code=503, detail="database unreachable") from None
+        raise HTTPException(
+            status_code=503,
+            detail="database unreachable",
+        ) from None
+
     return {"status": "ok", "database": "reachable"}
+
+
+app.include_router(wazuh_router)

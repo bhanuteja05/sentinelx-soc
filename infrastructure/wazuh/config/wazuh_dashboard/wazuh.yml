@@ -1,7 +1,12 @@
+# Initial Wazuh API connection seed for the dashboard.
+# The password field here is overridden at container startup by the
+# API_PASSWORD environment variable passed in infrastructure/wazuh/docker-compose.yml,
+# which reads from WAZUH_API_PASSWORD in your .env file.
+# Set WAZUH_API_PASSWORD in .env and never commit real credentials here.
 hosts:
   - 1513629884013:
       url: "https://wazuh.manager"
       port: 55000
       username: wazuh-wui
-      password: "MyS3cr37P450r.*-"
+      password: "change-me-via-WAZUH_API_PASSWORD-in-env"
       run_as: true

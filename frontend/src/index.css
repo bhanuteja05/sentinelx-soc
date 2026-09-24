@@ -26,6 +26,10 @@ body {
   padding: 4rem 1.5rem;
 }
 
+.status-page.dashboard {
+  max-width: 72rem;
+}
+
 h1 {
   margin: 0 0 0.25rem;
   font-size: 2rem;
@@ -85,4 +89,135 @@ dd[data-state='unavailable'] {
 
 dd[data-state='loading'] {
   color: #e6c07b;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin: 2rem 0 1rem;
+}
+
+.section-header h2 {
+  margin: 0;
+}
+
+.section-header span {
+  color: #8b98a5;
+  font-size: 0.9rem;
+}
+
+.agents-section,
+.alerts-section {
+  margin-top: 0.5rem;
+}
+
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+
+.agent-card {
+  padding: 1rem 1.1rem;
+  border: 1px solid #2d3a4d;
+  border-radius: 8px;
+  background: #1a2332;
+}
+
+.agent-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.agent-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.agent-card p {
+  margin: 0.25rem 0;
+  color: #8b98a5;
+  font-size: 0.9rem;
+}
+
+.agent-header span[data-state='active'] {
+  color: #3dd68c;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.agent-header span[data-state='disconnected'] {
+  color: #f07178;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.alerts-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #2d3a4d;
+  border-radius: 8px;
+  background: #1a2332;
+}
+
+.alerts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.alerts-table th,
+.alerts-table td {
+  text-align: left;
+  padding: 0.7rem 0.85rem;
+  vertical-align: top;
+  border-bottom: 1px solid #2d3a4d;
+}
+
+.alerts-table th {
+  color: #8b98a5;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.alerts-table td:nth-child(3) {
+  min-width: 14rem;
+}
+
+.sev {
+  display: inline-block;
+  min-width: 1.5rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.sev-low {
+  color: #3dd68c;
+  background: rgba(61, 214, 140, 0.12);
+}
+
+.sev-medium {
+  color: #e6c07b;
+  background: rgba(230, 192, 123, 0.12);
+}
+
+.sev-high {
+  color: #f0a060;
+  background: rgba(240, 160, 96, 0.14);
+}
+
+.sev-critical {
+  color: #f07178;
+  background: rgba(240, 113, 120, 0.14);
+}
+
+.sev-unknown {
+  color: #8b98a5;
+  background: rgba(139, 152, 165, 0.12);
 }

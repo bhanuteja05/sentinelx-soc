@@ -1,6 +1,18 @@
 # Application stack only (db, backend, frontend).
 # Wazuh is isolated: infrastructure/wazuh/docker-compose.yml
-#   docker compose -f infrastructure/wazuh/docker-compose.yml --env-file .env --profile wazuh up -d
+#
+# Startup order:
+#   1. docker compose up -d --build          (this file – always safe to run first)
+#   2. Start Wazuh stack when needed:
+#        docker compose -f infrastructure/wazuh/generate-indexer-certs.yml --env-file .env run --rm generator
+#        docker compose -f infrastructure/wazuh/docker-compose.yml --env-file .env --profile wazuh up -d wazuh.indexer
+#        docker compose -f infrastructure/wazuh/docker-compose.yml --env-file .env --profile wazuh up -d wazuh.manager
+#        docker compose -f infrastructure/wazuh/docker-compose.yml --env-file .env --profile wazuh up -d wazuh.dashboard
+#
+# sentinelx-siem is created by this compose so the app stack boots independently.
+# The Wazuh compose declares it as external and joins the same network.
+# The backend reaches wazuh.indexer:9200 only when Wazuh is running; otherwise
+# /api/v1/wazuh/* routes return 502 (graceful degradation).
 services:
   db:
     image: postgres:17
@@ -35,6 +47,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      # Wazuh manager API is published to the host on port 55000 (Docker Desktop).
+      # The backend reaches it via host.docker.internal so no SIEM network hop is needed.
+      WAZUH_API_URL: https://host.docker.internal:55000
+      # Indexer is only reachable inside sentinelx-siem (9200 not published to host).
+      WAZUH_INDEXER_URL: ${WAZUH_INDEXER_URL:-https://wazuh.indexer:9200}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -43,6 +60,7 @@ services:
     networks:
       - sentinelx-web
       - sentinelx-data
+      - sentinelx-siem
     healthcheck:
       test:
         [
@@ -91,6 +109,12 @@ networks:
     name: sentinelx-data
   sentinelx-web:
     name: sentinelx-web
+  # Created here so the app stack boots without requiring Wazuh to be running first.
+  # The Wazuh compose (infrastructure/wazuh/docker-compose.yml) declares this as
+  # external and attaches its services to it when started.
+  sentinelx-siem:
+    name: sentinelx-siem
+    attachable: true
 
 volumes:
   sentinelx_pgdata:
