@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY --chown=appuser:appuser alembic.ini .
 COPY --chown=appuser:appuser alembic ./alembic
 COPY --chown=appuser:appuser app ./app
+COPY --chown=appuser:appuser tests ./tests
 
 USER appuser
 
