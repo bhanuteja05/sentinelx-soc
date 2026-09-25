@@ -4,6 +4,7 @@ backend/app/wazuh/schemas.py
 Pydantic schemas and pure normalization helpers for Wazuh SIEM alerts and events.
 """
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -57,6 +58,35 @@ class WazuhIngestSummary(BaseModel):
     duplicates: int = 0
     errors: int = 0
     error_details: list[WazuhIngestError] = Field(default_factory=list)
+
+
+class WazuhSchedulerResult(BaseModel):
+    """Result summary of a single scheduled ingestion cycle."""
+
+    received: int = 0
+    ingested: int = 0
+    duplicates: int = 0
+    errors: int = 0
+    duration_seconds: float = 0.0
+
+
+class WazuhSchedulerStatus(BaseModel):
+    """Telemetry and status representation for the background ingestion scheduler."""
+
+    enabled: bool
+    running: bool
+    is_active: bool
+    interval_seconds: float
+    batch_size: int
+    last_run_at: datetime | None = None
+    last_success_at: datetime | None = None
+    last_failure_at: datetime | None = None
+    last_error: str | None = None
+    last_result: WazuhSchedulerResult | None = None
+    total_cycles: int = 0
+    successful_cycles: int = 0
+    failed_cycles: int = 0
+    skipped_cycles: int = 0
 
 
 def _as_str(value: Any) -> str | None:

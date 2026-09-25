@@ -17,7 +17,12 @@ from app.wazuh.client import (
     WazuhConnectionError,
     WazuhIndexerError,
 )
-from app.wazuh.schemas import WazuhAlertsResponse, WazuhIngestSummary
+from app.wazuh.schemas import (
+    WazuhAlertsResponse,
+    WazuhIngestSummary,
+    WazuhSchedulerStatus,
+)
+from app.wazuh.scheduler import wazuh_scheduler
 from app.wazuh.service import wazuh_service
 
 logger = logging.getLogger(__name__)
@@ -105,3 +110,9 @@ def wazuh_ingest_event(
             status_code=400,
             detail="Failed to process Wazuh event payload",
         ) from None
+
+
+@router.get("/ingestion/status", response_model=WazuhSchedulerStatus)
+def wazuh_ingestion_status() -> WazuhSchedulerStatus:
+    """Return status and telemetry for the background Wazuh alert ingestion scheduler."""
+    return wazuh_scheduler.get_status()

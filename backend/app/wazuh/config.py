@@ -20,6 +20,9 @@ class WazuhSettings:
     indexer_password: str
     timeout: float = 10.0
     verify_ssl: bool = False
+    ingest_enabled: bool = True
+    ingest_interval_seconds: float = 30.0
+    ingest_batch_size: int = 50
 
     def redact(self, text: str) -> str:
         """Redact known credentials from strings before logging or raising."""
@@ -49,6 +52,21 @@ def get_wazuh_settings() -> WazuhSettings:
     verify_raw = os.getenv("WAZUH_VERIFY_SSL", "false").strip().lower()
     verify_ssl = verify_raw in ("1", "true", "yes")
 
+    enabled_raw = os.getenv("WAZUH_INGEST_ENABLED", "true").strip().lower()
+    ingest_enabled = enabled_raw in ("1", "true", "yes")
+
+    interval_raw = os.getenv("WAZUH_INGEST_INTERVAL_SECONDS", "30.0")
+    try:
+        ingest_interval_seconds = max(1.0, float(interval_raw))
+    except ValueError:
+        ingest_interval_seconds = 30.0
+
+    batch_raw = os.getenv("WAZUH_INGEST_BATCH_SIZE", "50")
+    try:
+        ingest_batch_size = max(1, min(500, int(batch_raw)))
+    except ValueError:
+        ingest_batch_size = 50
+
     return WazuhSettings(
         api_url=api_url,
         api_user=api_user,
@@ -58,4 +76,7 @@ def get_wazuh_settings() -> WazuhSettings:
         indexer_password=indexer_password,
         timeout=timeout,
         verify_ssl=verify_ssl,
+        ingest_enabled=ingest_enabled,
+        ingest_interval_seconds=ingest_interval_seconds,
+        ingest_batch_size=ingest_batch_size,
     )
