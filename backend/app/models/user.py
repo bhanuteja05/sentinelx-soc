@@ -1,9 +1,13 @@
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Integer, String, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.models.case_note import CaseNote
 
 VALID_ROLES: set[str] = {"analyst", "admin"}
 
@@ -33,4 +37,11 @@ class User(Base):
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
+    )
+
+    case_notes: Mapped[list["CaseNote"]] = relationship(
+        "CaseNote",
+        back_populates="author",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )

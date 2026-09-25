@@ -9,6 +9,7 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.alert import Alert
     from app.models.case_alert import CaseAlert
+    from app.models.case_note import CaseNote
 
 
 class Case(Base):
@@ -37,6 +38,13 @@ class Case(Base):
         "Alert",
         secondary="case_alerts",
         viewonly=True,
+    )
+    notes: Mapped[list["CaseNote"]] = relationship(
+        "CaseNote",
+        back_populates="case",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="CaseNote.created_at.asc()",
     )
 
     def __repr__(self) -> str:

@@ -3,14 +3,19 @@ app/api/cases.py
 ~~~~~~~~~~~~~~~~
 Case management and incident investigation endpoints.
 
-POST   /api/v1/cases                           Create a case (201)
-GET    /api/v1/cases                           Paginated case listing
-GET    /api/v1/cases/{case_id}                 Case investigation detail (includes alert summaries)
-PATCH  /api/v1/cases/{case_id}                 Update case metadata, status, or severity
-POST   /api/v1/cases/{case_id}/close           Close a case
+POST   /api/v1/cases                             Create a case (201)
+GET    /api/v1/cases                             Paginated case listing
+GET    /api/v1/cases/{case_id}                   Case investigation detail (includes alert summaries)
+PATCH  /api/v1/cases/{case_id}                   Update case metadata, status, or severity
+POST   /api/v1/cases/{case_id}/close             Close a case
+DELETE /api/v1/cases/{case_id}                   Delete a case (admin only)
 POST   /api/v1/cases/{case_id}/alerts/{alert_id} Associate alert with case (idempotent)
 DELETE /api/v1/cases/{case_id}/alerts/{alert_id} Detach alert from case (204, alert preserved)
-GET    /api/v1/cases/{case_id}/alerts          Paginated alerts attached to case
+GET    /api/v1/cases/{case_id}/alerts            Paginated alerts attached to case
+POST   /api/v1/cases/{case_id}/notes             Add investigation note to case (201)
+GET    /api/v1/cases/{case_id}/notes             List investigation notes chronologically
+PATCH  /api/v1/cases/{case_id}/notes/{note_id}   Update investigation note (author only)
+DELETE /api/v1/cases/{case_id}/notes/{note_id}   Delete investigation note (author or admin)
 """
 
 import logging
@@ -21,8 +26,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.alerts import AlertOut, PaginatedAlertsResponse, _alert_to_out
-from app.api.deps import require_role
+from app.api.deps import get_current_active_user, require_role
 from app.db import get_db
+from app.models.case_note import CaseNote
+from app.models.user import User
 
 from app.repositories.case import SORTABLE_CASE_FIELDS, count_case_alerts
 from app.services.case import (
@@ -31,15 +38,21 @@ from app.services.case import (
     AlertNotFoundError,
     AssociationNotFoundError,
     CaseNotFoundError,
+    CaseNoteNotFoundError,
+    CaseNotePermissionError,
+    add_case_note,
     associate_alert_service,
     close_case as service_close_case,
     delete_case as service_delete_case,
+    delete_case_note_service,
     detach_alert_service,
     get_case_detail_service,
+    get_case_notes_service,
     list_case_alerts_service,
     open_case,
     search_cases_service,
     update_case as service_update_case,
+    update_case_note_service,
 )
 
 logger = logging.getLogger(__name__)
@@ -114,6 +127,44 @@ class CaseAlertAssociationOut(BaseModel):
     is_new: bool
 
 
+class CaseNoteAuthorOut(BaseModel):
+    """Author summary in a case note."""
+
+    id: int
+    username: str
+    email: str
+    role: str
+
+    model_config = {"from_attributes": True}
+
+
+class CaseNoteCreate(BaseModel):
+    """Schema for adding an investigation note."""
+
+    content: str = Field(..., min_length=1, max_length=10000, description="Investigation note content")
+
+
+class CaseNoteUpdate(BaseModel):
+    """Schema for updating an investigation note."""
+
+    content: str = Field(..., min_length=1, max_length=10000, description="Updated investigation note content")
+
+
+class CaseNoteOut(BaseModel):
+    """Investigation note representation."""
+
+    id: int
+    case_id: int
+    author_id: int
+    author_username: str
+    author: CaseNoteAuthorOut | None = None
+    content: str
+    created_at: str
+    updated_at: str
+
+    model_config = {"from_attributes": True}
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -143,6 +194,29 @@ def _case_to_detail_out(case, alert_count: int, alerts) -> CaseDetailOut:
         updated_at=case.updated_at.isoformat(),
         alert_count=alert_count,
         alerts=[_alert_to_out(a) for a in alerts],
+    )
+
+
+def _note_to_out(note: CaseNote) -> CaseNoteOut:
+    author_out = None
+    author_username = "unknown"
+    if note.author:
+        author_username = note.author.username
+        author_out = CaseNoteAuthorOut(
+            id=note.author.id,
+            username=note.author.username,
+            email=note.author.email,
+            role=note.author.role,
+        )
+    return CaseNoteOut(
+        id=note.id,
+        case_id=note.case_id,
+        author_id=note.author_id,
+        author_username=author_username,
+        author=author_out,
+        content=note.content,
+        created_at=note.created_at.isoformat(),
+        updated_at=note.updated_at.isoformat(),
     )
 
 
@@ -337,7 +411,6 @@ def delete_case_endpoint(
         raise HTTPException(status_code=404, detail=f"Case {case_id} not found.")
 
 
-
 @router.get("/{case_id}", response_model=CaseDetailOut)
 def get_case_endpoint(
     case_id: int,
@@ -350,3 +423,111 @@ def get_case_endpoint(
 
     case, alert_count, alerts = detail
     return _case_to_detail_out(case, alert_count, alerts)
+
+
+# ---------------------------------------------------------------------------
+# Case Notes Routes
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{case_id}/notes", response_model=CaseNoteOut, status_code=status.HTTP_201_CREATED)
+def create_case_note_endpoint(
+    case_id: int,
+    payload: CaseNoteCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> CaseNoteOut:
+    """Add an investigation note to a case."""
+    try:
+        note = add_case_note(
+            db=db,
+            case_id=case_id,
+            author_id=current_user.id,
+            content=payload.content,
+        )
+    except CaseNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        logger.error("Failed to create note for case %d (%s): %s", case_id, type(exc).__name__, str(exc)[:200])
+        raise HTTPException(status_code=500, detail="Database failure creating case note.") from None
+
+    return _note_to_out(note)
+
+
+@router.get("/{case_id}/notes", response_model=list[CaseNoteOut])
+def list_case_notes_endpoint(
+    case_id: int,
+    db: Session = Depends(get_db),
+) -> list[CaseNoteOut]:
+    """Retrieve all investigation notes for a case in chronological order."""
+    try:
+        notes = get_case_notes_service(db=db, case_id=case_id)
+    except CaseNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        logger.error("Failed to list notes for case %d (%s): %s", case_id, type(exc).__name__, str(exc)[:200])
+        raise HTTPException(status_code=500, detail="Database failure listing case notes.") from None
+
+    return [_note_to_out(n) for n in notes]
+
+
+@router.patch("/{case_id}/notes/{note_id}", response_model=CaseNoteOut)
+def update_case_note_endpoint(
+    case_id: int,
+    note_id: int,
+    payload: CaseNoteUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> CaseNoteOut:
+    """Update an investigation note. Only the note's author can edit."""
+    try:
+        note = update_case_note_service(
+            db=db,
+            case_id=case_id,
+            note_id=note_id,
+            content=payload.content,
+            user_id=current_user.id,
+            user_role=current_user.role,
+        )
+    except CaseNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except CaseNoteNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except CaseNotePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        logger.error("Failed to update note %d for case %d (%s): %s", note_id, case_id, type(exc).__name__, str(exc)[:200])
+        raise HTTPException(status_code=500, detail="Database failure updating case note.") from None
+
+    return _note_to_out(note)
+
+
+@router.delete("/{case_id}/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_case_note_endpoint(
+    case_id: int,
+    note_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """Delete an investigation note. The author or an admin can delete."""
+    try:
+        delete_case_note_service(
+            db=db,
+            case_id=case_id,
+            note_id=note_id,
+            user_id=current_user.id,
+            user_role=current_user.role,
+        )
+    except CaseNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except CaseNoteNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except CaseNotePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except Exception as exc:
+        logger.error("Failed to delete note %d for case %d (%s): %s", note_id, case_id, type(exc).__name__, str(exc)[:200])
+        raise HTTPException(status_code=500, detail="Database failure deleting case note.") from None

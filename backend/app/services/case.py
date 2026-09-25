@@ -6,19 +6,25 @@ from sqlalchemy.orm import Session
 from app.models.alert import Alert
 from app.models.case import Case
 from app.models.case_alert import CaseAlert
+from app.models.case_note import CaseNote
 from app.repositories.alert import get_alert_by_id
 from app.repositories.case import (
     associate_alert_to_case,
     count_case_alerts,
     create_case as repo_create_case,
+    create_case_note as repo_create_case_note,
     delete_case as repo_delete_case,
+    delete_case_note as repo_delete_case_note,
     get_case_by_id,
+    get_case_note_by_id as repo_get_case_note,
     is_alert_associated,
     list_case_alerts,
+    list_case_notes as repo_list_case_notes,
     list_cases as repo_list_cases,
     remove_alert_from_case,
     search_cases,
     update_case as repo_update_case,
+    update_case_note as repo_update_case_note,
 )
 
 VALID_STATUSES = {"open", "in_progress", "escalated", "resolved", "closed"}
@@ -35,6 +41,14 @@ class AlertNotFoundError(Exception):
 
 class AssociationNotFoundError(Exception):
     """Raised when an alert-case association is not found upon detachment."""
+
+
+class CaseNoteNotFoundError(Exception):
+    """Raised when a referenced CaseNote is not found."""
+
+
+class CaseNotePermissionError(Exception):
+    """Raised when user does not have permission to modify or delete a note."""
 
 
 def open_case(
@@ -219,3 +233,81 @@ def list_case_alerts_service(
         "page_size": page_size,
         "pages": pages,
     }
+
+
+def add_case_note(
+    db: Session,
+    case_id: int,
+    author_id: int,
+    content: str,
+) -> CaseNote:
+    """Add an investigation note to a case."""
+    case = get_case_by_id(db, case_id)
+    if not case:
+        raise CaseNotFoundError(f"Case {case_id} not found.")
+    clean = content.strip()
+    if not clean:
+        raise ValueError("Note content cannot be empty.")
+    if len(clean) > 10000:
+        raise ValueError("Note content exceeds maximum length of 10000 characters.")
+    return repo_create_case_note(db, case_id=case_id, author_id=author_id, content=clean)
+
+
+def get_case_notes_service(
+    db: Session,
+    case_id: int,
+) -> list[CaseNote]:
+    """Retrieve all notes for a case chronologically."""
+    case = get_case_by_id(db, case_id)
+    if not case:
+        raise CaseNotFoundError(f"Case {case_id} not found.")
+    return repo_list_case_notes(db, case_id=case_id)
+
+
+def update_case_note_service(
+    db: Session,
+    case_id: int,
+    note_id: int,
+    content: str,
+    user_id: int,
+    user_role: str,
+) -> CaseNote:
+    """Update a case note with ownership validation."""
+    case = get_case_by_id(db, case_id)
+    if not case:
+        raise CaseNotFoundError(f"Case {case_id} not found.")
+    note = repo_get_case_note(db, note_id)
+    if not note or note.case_id != case_id:
+        raise CaseNoteNotFoundError(f"Note {note_id} not found in case {case_id}.")
+
+    if note.author_id != user_id:
+        raise CaseNotePermissionError("Analysts can only edit their own notes.")
+
+    clean = content.strip()
+    if not clean:
+        raise ValueError("Note content cannot be empty.")
+    if len(clean) > 10000:
+        raise ValueError("Note content exceeds maximum length of 10000 characters.")
+
+    return repo_update_case_note(db, note, clean)
+
+
+def delete_case_note_service(
+    db: Session,
+    case_id: int,
+    note_id: int,
+    user_id: int,
+    user_role: str,
+) -> None:
+    """Delete a case note with author or admin authorization."""
+    case = get_case_by_id(db, case_id)
+    if not case:
+        raise CaseNotFoundError(f"Case {case_id} not found.")
+    note = repo_get_case_note(db, note_id)
+    if not note or note.case_id != case_id:
+        raise CaseNoteNotFoundError(f"Note {note_id} not found in case {case_id}.")
+
+    if note.author_id != user_id and user_role != "admin":
+        raise CaseNotePermissionError("You do not have permission to delete this note.")
+
+    repo_delete_case_note(db, note)

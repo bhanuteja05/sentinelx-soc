@@ -2,11 +2,16 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   closeCase,
+  createCaseNote,
   deleteCase,
+  deleteCaseNote,
   detachAlertFromCase,
   fetchCaseById,
+  fetchCaseNotes,
   updateCase,
+  updateCaseNote,
   type CaseDetailOut,
+  type CaseNote,
   NotFoundError,
 } from '../api/client'
 import { SeverityBadge, SeverityLabel } from '../components/SeverityBadge'
@@ -37,15 +42,35 @@ export default function CaseDetail() {
   const [editSeverity, setEditSeverity] = useState('')
   const [saving, setSaving] = useState(false)
 
+  // Case notes state
+  const [notes, setNotes] = useState<CaseNote[]>([])
+  const [loadingNotes, setLoadingNotes] = useState(true)
+  const [notesError, setNotesError] = useState<string | null>(null)
+
+  // Add note form state
+  const [newNoteContent, setNewNoteContent] = useState('')
+  const [addingNote, setAddingNote] = useState(false)
+  const [addNoteError, setAddNoteError] = useState<string | null>(null)
+
+  // Edit note state
+  const [editingNoteId, setEditingNoteId] = useState<number | null>(null)
+  const [editingContent, setEditingContent] = useState('')
+  const [savingNoteEdit, setSavingNoteEdit] = useState(false)
+  const [editNoteError, setEditNoteError] = useState<string | null>(null)
+
   async function reload() {
     if (!id) return
     try {
-      const data = await fetchCaseById(Number(id))
-      setCase(data)
-      setEditTitle(data.title)
-      setEditDesc(data.description ?? '')
-      setEditStatus(data.status)
-      setEditSeverity(data.severity)
+      const [caseData, notesData] = await Promise.all([
+        fetchCaseById(Number(id)),
+        fetchCaseNotes(Number(id)),
+      ])
+      setCase(caseData)
+      setEditTitle(caseData.title)
+      setEditDesc(caseData.description ?? '')
+      setEditStatus(caseData.status)
+      setEditSeverity(caseData.severity)
+      setNotes(notesData)
     } catch (e) {
       if (e instanceof NotFoundError) {
         setError(`Case #${id} not found.`)
@@ -60,14 +85,19 @@ export default function CaseDetail() {
     async function load() {
       if (!id) return
       setLoading(true)
+      setLoadingNotes(true)
       try {
-        const data = await fetchCaseById(Number(id))
+        const [caseData, notesData] = await Promise.all([
+          fetchCaseById(Number(id)),
+          fetchCaseNotes(Number(id)),
+        ])
         if (!cancelled) {
-          setCase(data)
-          setEditTitle(data.title)
-          setEditDesc(data.description ?? '')
-          setEditStatus(data.status)
-          setEditSeverity(data.severity)
+          setCase(caseData)
+          setEditTitle(caseData.title)
+          setEditDesc(caseData.description ?? '')
+          setEditStatus(caseData.status)
+          setEditSeverity(caseData.severity)
+          setNotes(notesData)
         }
       } catch (e) {
         if (!cancelled) {
@@ -78,11 +108,16 @@ export default function CaseDetail() {
           }
         }
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+          setLoadingNotes(false)
+        }
       }
     }
     void load()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [id])
 
   async function handleSaveEdit(e: React.FormEvent) {
@@ -142,6 +177,77 @@ export default function CaseDetail() {
       setTimeout(() => setActionMsg(null), 3000)
     } catch (e) {
       setError(String(e))
+    }
+  }
+
+  async function handleAddNote(e: React.FormEvent) {
+    e.preventDefault()
+    if (!id || !c) return
+    const content = newNoteContent.trim()
+    if (!content) {
+      setAddNoteError('Note content cannot be empty.')
+      return
+    }
+    setAddingNote(true)
+    setAddNoteError(null)
+    try {
+      const created = await createCaseNote(c.id, content)
+      setNotes((prev) => [...prev, created])
+      setNewNoteContent('')
+      setActionMsg('Investigation note added.')
+      setTimeout(() => setActionMsg(null), 3000)
+    } catch (e) {
+      setAddNoteError(String(e))
+    } finally {
+      setAddingNote(false)
+    }
+  }
+
+  function handleStartEditNote(note: CaseNote) {
+    setEditingNoteId(note.id)
+    setEditingContent(note.content)
+    setEditNoteError(null)
+  }
+
+  function handleCancelEditNote() {
+    setEditingNoteId(null)
+    setEditingContent('')
+    setEditNoteError(null)
+  }
+
+  async function handleSaveEditNote(noteId: number) {
+    if (!id || !c) return
+    const content = editingContent.trim()
+    if (!content) {
+      setEditNoteError('Note content cannot be empty.')
+      return
+    }
+    setSavingNoteEdit(true)
+    setEditNoteError(null)
+    try {
+      const updated = await updateCaseNote(c.id, noteId, content)
+      setNotes((prev) => prev.map((n) => (n.id === noteId ? updated : n)))
+      setEditingNoteId(null)
+      setEditingContent('')
+      setActionMsg('Note updated.')
+      setTimeout(() => setActionMsg(null), 3000)
+    } catch (e) {
+      setEditNoteError(String(e))
+    } finally {
+      setSavingNoteEdit(false)
+    }
+  }
+
+  async function handleDeleteNote(noteId: number) {
+    if (!c) return
+    if (!confirm('Are you sure you want to delete this investigation note?')) return
+    try {
+      await deleteCaseNote(c.id, noteId)
+      setNotes((prev) => prev.filter((n) => n.id !== noteId))
+      setActionMsg('Note deleted.')
+      setTimeout(() => setActionMsg(null), 3000)
+    } catch (e) {
+      setNotesError(String(e))
     }
   }
 
@@ -268,12 +374,142 @@ export default function CaseDetail() {
         </div>
 
         <div className="meta-card meta-card--wide">
-          <h3>Investigation Description / Notes</h3>
+          <h3>Investigation Description / Summary</h3>
           <p className="case-desc-text">
             {c.description ?? <span className="text-muted">No description provided.</span>}
           </p>
         </div>
       </div>
+
+      {/* Investigation Notes & Timeline */}
+      <section className="dash-section">
+        <div className="section-header">
+          <h2>Investigation Notes ({notes.length})</h2>
+        </div>
+
+        {/* Add Note Card */}
+        <div className="new-note-card">
+          <h4>Add Investigation Note</h4>
+          {addNoteError && <div className="error-banner">{addNoteError}</div>}
+          <form onSubmit={handleAddNote}>
+            <div className="form-group">
+              <textarea
+                className="note-textarea"
+                rows={3}
+                placeholder="Document findings, forensic artifacts, hypotheses, containment steps..."
+                value={newNoteContent}
+                onChange={(e) => setNewNoteContent(e.target.value)}
+                maxLength={10000}
+              />
+              <div className="char-count">
+                {newNoteContent.length} / 10000 characters
+              </div>
+            </div>
+            <div className="form-actions">
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={addingNote || !newNoteContent.trim()}
+              >
+                {addingNote ? 'Adding…' : 'Add Note'}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* Notes Timeline */}
+        {loadingNotes ? (
+          <Spinner label="Loading investigation notes…" />
+        ) : notesError ? (
+          <ErrorBanner message={notesError} />
+        ) : notes.length === 0 ? (
+          <p className="empty-text">No investigation notes recorded for this case yet.</p>
+        ) : (
+          <div className="notes-timeline">
+            {notes.map((note) => {
+              const isAuthor = user?.id === note.author_id
+              const canDelete = isAuthor || user?.role === 'admin'
+              const isEditingThisNote = editingNoteId === note.id
+
+              return (
+                <div key={note.id} className="timeline-item">
+                  <div className="timeline-marker" />
+                  <div className="timeline-card">
+                    <div className="timeline-header">
+                      <div className="timeline-meta">
+                        <span className="timeline-author">{note.author_username}</span>
+                        {note.author?.role && (
+                          <span className={`role-badge role-${note.author.role}`}>
+                            {note.author.role}
+                          </span>
+                        )}
+                        <span className="timeline-time">{formatTs(note.created_at)}</span>
+                        {note.updated_at !== note.created_at && (
+                          <span className="timeline-edited" title={`Edited ${formatTs(note.updated_at)}`}>
+                            (edited)
+                          </span>
+                        )}
+                      </div>
+                      <div className="timeline-actions">
+                        {isAuthor && !isEditingThisNote && (
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-secondary"
+                            onClick={() => handleStartEditNote(note)}
+                          >
+                            Edit
+                          </button>
+                        )}
+                        {canDelete && !isEditingThisNote && (
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-danger"
+                            onClick={() => handleDeleteNote(note.id)}
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {isEditingThisNote ? (
+                      <div className="note-edit-form">
+                        {editNoteError && <div className="error-banner">{editNoteError}</div>}
+                        <textarea
+                          className="note-textarea"
+                          rows={3}
+                          value={editingContent}
+                          onChange={(e) => setEditingContent(e.target.value)}
+                          maxLength={10000}
+                        />
+                        <div className="form-actions">
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-primary"
+                            disabled={savingNoteEdit || !editingContent.trim()}
+                            onClick={() => handleSaveEditNote(note.id)}
+                          >
+                            {savingNoteEdit ? 'Saving…' : 'Save'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-xs btn-secondary"
+                            onClick={handleCancelEditNote}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="timeline-body">{note.content}</div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </section>
 
       {/* Associated Alerts */}
       <section className="dash-section">

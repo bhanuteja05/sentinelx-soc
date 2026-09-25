@@ -163,6 +163,32 @@ export type CaseAlertAssociationOut = {
   is_new: boolean
 }
 
+export type CaseNoteAuthor = {
+  id: number
+  username: string
+  email: string
+  role: string
+}
+
+export type CaseNote = {
+  id: number
+  case_id: number
+  author_id: number
+  author_username: string
+  author?: CaseNoteAuthor | null
+  content: string
+  created_at: string
+  updated_at: string
+}
+
+export type CreateCaseNoteBody = {
+  content: string
+}
+
+export type UpdateCaseNoteBody = {
+  content: string
+}
+
 // ── Error classes ────────────────────────────────────────────────────────────
 
 export class BackendUnavailableError extends Error {
@@ -510,6 +536,42 @@ export async function fetchCaseAlerts(
   return apiFetch<PaginatedAlertsResponse>(
     `/api/v1/cases/${caseId}/alerts${buildQuery(query as Record<string, string | number | undefined>)}`,
   )
+}
+
+// ── Case Notes API calls ──────────────────────────────────────────────────────
+
+export async function fetchCaseNotes(caseId: number): Promise<CaseNote[]> {
+  return apiFetch<CaseNote[]>(`/api/v1/cases/${caseId}/notes`)
+}
+
+export async function createCaseNote(
+  caseId: number,
+  content: string,
+): Promise<CaseNote> {
+  return apiFetch<CaseNote>(`/api/v1/cases/${caseId}/notes`, {
+    method: 'POST',
+    body: JSON.stringify({ content }),
+  })
+}
+
+export async function updateCaseNote(
+  caseId: number,
+  noteId: number,
+  content: string,
+): Promise<CaseNote> {
+  return apiFetch<CaseNote>(`/api/v1/cases/${caseId}/notes/${noteId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ content }),
+  })
+}
+
+export async function deleteCaseNote(
+  caseId: number,
+  noteId: number,
+): Promise<void> {
+  return apiFetch<void>(`/api/v1/cases/${caseId}/notes/${noteId}`, {
+    method: 'DELETE',
+  })
 }
 
 // ── Enrichment types ─────────────────────────────────────────────────────────

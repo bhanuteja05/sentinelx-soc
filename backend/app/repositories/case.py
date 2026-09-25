@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.alert import Alert
 from app.models.case import Case
 from app.models.case_alert import CaseAlert
+from app.models.case_note import CaseNote
 
 SORTABLE_CASE_FIELDS: dict[str, Any] = {
     "created_at": Case.created_at,
@@ -81,42 +82,52 @@ def list_cases(
     severity: str | None = None,
 ) -> list[Case]:
     stmt = select(Case)
-    if status:
-        stmt = stmt.where(Case.status == status)
-    if severity:
-        stmt = stmt.where(Case.severity == severity)
+    clauses = []
+    if status is not None:
+        clauses.append(Case.status == status)
+    if severity is not None:
+        clauses.append(Case.severity == severity)
+    if clauses:
+        stmt = stmt.where(*clauses)
 
-    stmt = stmt.order_by(Case.created_at.desc()).offset(skip).limit(limit)
+    stmt = stmt.order_by(Case.created_at.desc(), Case.id.desc()).offset(skip).limit(limit)
     return list(db.scalars(stmt).all())
 
 
+def count_cases(
+    db: Session,
+    status: str | None = None,
+    severity: str | None = None,
+) -> int:
+    stmt = select(func.count(Case.id))
+    clauses = []
+    if status is not None:
+        clauses.append(Case.status == status)
+    if severity is not None:
+        clauses.append(Case.severity == severity)
+    if clauses:
+        stmt = stmt.where(*clauses)
+    return db.scalar(stmt) or 0
+
+
 def update_case(db: Session, case_id: int, update_data: dict[str, Any]) -> Case | None:
-    db_case = get_case_by_id(db, case_id)
-    if not db_case:
+    case = db.get(Case, case_id)
+    if not case:
         return None
-
-    for key, value in update_data.items():
-        if hasattr(db_case, key) and key != "id":
-            setattr(db_case, key, value)
-
+    for field, val in update_data.items():
+        setattr(case, field, val)
     db.commit()
-    db.refresh(db_case)
-    return db_case
+    db.refresh(case)
+    return case
 
 
 def delete_case(db: Session, case_id: int) -> bool:
-    db_case = get_case_by_id(db, case_id)
-    if not db_case:
+    case = db.get(Case, case_id)
+    if not case:
         return False
-
-    db.delete(db_case)
+    db.delete(case)
     db.commit()
     return True
-
-
-# ---------------------------------------------------------------------------
-# Case ↔ Alert Association Repository Methods
-# ---------------------------------------------------------------------------
 
 
 def associate_alert_to_case(db: Session, case_id: int, alert_id: int) -> tuple[CaseAlert, bool]:
@@ -185,3 +196,41 @@ def count_case_alerts(db: Session, case_id: int) -> int:
     """Return total number of alerts associated with a case."""
     stmt = select(func.count(CaseAlert.alert_id)).where(CaseAlert.case_id == case_id)
     return db.scalar(stmt) or 0
+
+
+def create_case_note(db: Session, case_id: int, author_id: int, content: str) -> CaseNote:
+    """Create a new case note."""
+    note = CaseNote(case_id=case_id, author_id=author_id, content=content)
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return note
+
+
+def get_case_note_by_id(db: Session, note_id: int) -> CaseNote | None:
+    """Retrieve a case note by id."""
+    return db.get(CaseNote, note_id)
+
+
+def list_case_notes(db: Session, case_id: int) -> list[CaseNote]:
+    """Retrieve all case notes for a case ordered chronologically."""
+    stmt = (
+        select(CaseNote)
+        .where(CaseNote.case_id == case_id)
+        .order_by(CaseNote.created_at.asc(), CaseNote.id.asc())
+    )
+    return list(db.scalars(stmt).all())
+
+
+def update_case_note(db: Session, note: CaseNote, content: str) -> CaseNote:
+    """Update content of an existing case note."""
+    note.content = content
+    db.commit()
+    db.refresh(note)
+    return note
+
+
+def delete_case_note(db: Session, note: CaseNote) -> None:
+    """Delete an existing case note."""
+    db.delete(note)
+    db.commit()
