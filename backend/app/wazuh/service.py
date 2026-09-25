@@ -86,6 +86,11 @@ class WazuhService:
                 _persisted, is_new = ingest_alert(db, alert_dict)
                 if is_new:
                     ingested += 1
+                    try:
+                        from app.services.triage import evaluate_alert_against_rules
+                        evaluate_alert_against_rules(db, _persisted)
+                    except Exception as triage_exc:
+                        logger.error("Automated triage failed for alert %d (%s): %s", _persisted.id, type(triage_exc).__name__, triage_exc)
                 else:
                     duplicates += 1
             except AlertMappingError as exc:
@@ -126,6 +131,11 @@ class WazuhService:
                 _persisted, is_new = ingest_alert(db, alert_dict)
                 if is_new:
                     ingested += 1
+                    try:
+                        from app.services.triage import evaluate_alert_against_rules
+                        evaluate_alert_against_rules(db, _persisted)
+                    except Exception as triage_exc:
+                        logger.error("Automated triage failed for alert %d (%s): %s", _persisted.id, type(triage_exc).__name__, triage_exc)
                 else:
                     duplicates += 1
             except AlertMappingError as exc:

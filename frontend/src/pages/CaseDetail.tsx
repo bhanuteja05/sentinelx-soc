@@ -443,6 +443,11 @@ export default function CaseDetail() {
                             {note.author.role}
                           </span>
                         )}
+                        {(note.content.startsWith('[Automated Triage]') || note.author_username === 'system') && (
+                          <span className="role-badge triage-badge">
+                            ⚡ Automated Triage
+                          </span>
+                        )}
                         <span className="timeline-time">{formatTs(note.created_at)}</span>
                         {note.updated_at !== note.created_at && (
                           <span className="timeline-edited" title={`Edited ${formatTs(note.updated_at)}`}>

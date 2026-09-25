@@ -19,6 +19,7 @@ def test_alembic_migration_lifecycle():
     assert "cases" not in tables
     assert "users" not in tables
     assert "case_notes" not in tables
+    assert "triage_rules" not in tables
 
     # 2. Upgrade to head
     command.upgrade(alembic_cfg, "head")
@@ -28,4 +29,5 @@ def test_alembic_migration_lifecycle():
     assert "cases" in tables
     assert "users" in tables
     assert "case_notes" in tables
+    assert "triage_rules" in tables
     assert "alembic_version" in tables

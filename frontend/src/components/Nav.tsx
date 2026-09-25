@@ -5,6 +5,7 @@ const links = [
   { to: '/', label: 'Dashboard' },
   { to: '/alerts', label: 'Alerts' },
   { to: '/cases', label: 'Cases' },
+  { to: '/triage', label: 'Triage' },
   { to: '/status', label: 'System Status' },
 ]
 

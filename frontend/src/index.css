@@ -1974,3 +1974,141 @@ dd[data-state='loading'] {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ── Phase 7D: Automated Triage Styles ──────────────────────────────────────── */
+
+.triage-badge {
+  background: rgba(230, 192, 123, 0.15);
+  color: #e6c07b;
+  border: 1px solid rgba(230, 192, 123, 0.35);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.triage-result-banner {
+  background: #161f2e;
+  border: 1px solid #388bfd;
+  border-left: 4px solid #58a6ff;
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 2rem;
+}
+
+.result-summary h3 {
+  margin: 0 0 0.4rem 0;
+  font-size: 1.05rem;
+  color: #58a6ff;
+}
+
+.result-summary p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #c9d1d9;
+}
+
+.res-highlight {
+  font-weight: 700;
+}
+
+.res-create { color: #f07178; }
+.res-corr { color: #3dd68c; }
+.res-unmatch { color: #8b98a5; }
+
+.result-actions-list {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #2d3a4d;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.result-action-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: #e8edf2;
+}
+
+.action-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.action-create {
+  background: rgba(240, 113, 120, 0.18);
+  color: #f07178;
+  border: 1px solid rgba(240, 113, 120, 0.35);
+}
+
+.action-correlate {
+  background: rgba(61, 214, 140, 0.18);
+  color: #3dd68c;
+  border: 1px solid rgba(61, 214, 140, 0.35);
+}
+
+.criteria-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.criteria-chip {
+  background: #1a2332;
+  border: 1px solid #2d3a4d;
+  color: #58a6ff;
+  border-radius: 4px;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.75rem;
+  font-family: monospace;
+}
+
+.action-code {
+  background: #0f1419;
+  border: 1px solid #233145;
+  color: #79c0ff;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-family: monospace;
+}
+
+.template-preview {
+  font-size: 0.78rem;
+  color: #8b98a5;
+  font-family: monospace;
+  max-width: 14rem;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-desc {
+  font-size: 0.78rem;
+  color: #8b98a5;
+  font-weight: 400;
+  margin-top: 0.25rem;
+  line-height: 1.35;
+}
+
+.row-disabled {
+  opacity: 0.55;
+}
+
+.status-active {
+  background: rgba(61, 214, 140, 0.15);
+  color: #3dd68c;
+}
+
+.status-inactive {
+  background: rgba(139, 152, 165, 0.15);
+  color: #8b98a5;
+}

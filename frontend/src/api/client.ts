@@ -718,3 +718,100 @@ export type DashboardSummary = {
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
   return apiFetch<DashboardSummary>('/api/v1/dashboard/summary')
 }
+
+// ── Triage Automation types ──────────────────────────────────────────────────
+
+export type TriageRule = {
+  id: number
+  name: string
+  description: string | null
+  is_active: boolean
+  min_rule_level: number | null
+  rule_ids: string[]
+  mitre_techniques: string[]
+  mitre_tactics: string[]
+  action_type: string
+  case_severity: string
+  case_title_template: string
+  created_at: string
+  updated_at: string
+}
+
+export type CreateTriageRuleBody = {
+  name: string
+  description?: string
+  is_active?: boolean
+  min_rule_level?: number | null
+  rule_ids?: string[]
+  mitre_techniques?: string[]
+  mitre_tactics?: string[]
+  action_type?: string
+  case_severity?: string
+  case_title_template?: string
+}
+
+export type UpdateTriageRuleBody = {
+  name?: string
+  description?: string
+  is_active?: boolean
+  min_rule_level?: number | null
+  rule_ids?: string[]
+  mitre_techniques?: string[]
+  mitre_tactics?: string[]
+  action_type?: string
+  case_severity?: string
+  case_title_template?: string
+}
+
+export type TriageActionDetail = {
+  action: string
+  case_id: number
+  case_title: string
+  rule_id: number
+  rule_name: string
+  alert_id: number
+}
+
+export type TriageEvaluationResult = {
+  evaluated_alerts: number
+  matched_alerts: number
+  cases_created: number
+  alerts_correlated: number
+  unmatched_alerts: number
+  details: TriageActionDetail[]
+}
+
+export async function fetchTriageRules(isActive?: boolean): Promise<TriageRule[]> {
+  const query = isActive !== undefined ? `?is_active=${isActive}` : ''
+  return apiFetch<TriageRule[]>(`/api/v1/triage/rules${query}`)
+}
+
+export async function createTriageRule(body: CreateTriageRuleBody): Promise<TriageRule> {
+  return apiFetch<TriageRule>('/api/v1/triage/rules', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function updateTriageRule(
+  ruleId: number,
+  body: UpdateTriageRuleBody,
+): Promise<TriageRule> {
+  return apiFetch<TriageRule>(`/api/v1/triage/rules/${ruleId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function deleteTriageRule(ruleId: number): Promise<void> {
+  return apiFetch<void>(`/api/v1/triage/rules/${ruleId}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function evaluateTriageBacklog(limit = 100): Promise<TriageEvaluationResult> {
+  return apiFetch<TriageEvaluationResult>('/api/v1/triage/evaluate', {
+    method: 'POST',
+    body: JSON.stringify({ limit }),
+  })
+}

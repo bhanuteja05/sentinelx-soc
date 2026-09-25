@@ -10,6 +10,7 @@ import CaseDetail from './pages/CaseDetail'
 import CreateCase from './pages/CreateCase'
 import SystemStatus from './SystemStatus'
 import Login from './pages/Login'
+import Triage from './pages/Triage'
 
 function AppLayout() {
   return (
@@ -37,6 +38,7 @@ export default function App() {
             <Route path="/cases" element={<Cases />} />
             <Route path="/cases/new" element={<CreateCase />} />
             <Route path="/cases/:id" element={<CaseDetail />} />
+            <Route path="/triage" element={<Triage />} />
             <Route path="/status" element={<SystemStatus />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

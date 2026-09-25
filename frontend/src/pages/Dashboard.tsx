@@ -660,6 +660,9 @@ export default function Dashboard() {
             <Link to="/cases" className="btn btn-secondary btn-xs">
               Review Cases
             </Link>
+            <Link to="/triage" className="btn btn-secondary btn-xs">
+              Triage Rules
+            </Link>
             <Link to="/status" className="btn btn-secondary btn-xs">
               System Status
             </Link>
