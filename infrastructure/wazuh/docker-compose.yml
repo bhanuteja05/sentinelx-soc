@@ -74,6 +74,7 @@ services:
       SSL_KEY: /etc/ssl/filebeat.key
       API_USERNAME: ${WAZUH_API_USER:?WAZUH_API_USER is required}
       API_PASSWORD: ${WAZUH_API_PASSWORD:?WAZUH_API_PASSWORD is required}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-}
     volumes:
       - sentinelx_wazuh_api_configuration:/var/ossec/api/configuration
       - sentinelx_wazuh_etc:/var/ossec/etc
@@ -81,6 +82,8 @@ services:
       - sentinelx_wazuh_queue:/var/ossec/queue
       - sentinelx_wazuh_var_multigroups:/var/ossec/var/multigroups
       - sentinelx_wazuh_integrations:/var/ossec/integrations
+      - ./integrations/custom-sentinelx:/var/ossec/integrations/custom-sentinelx:ro
+      - ./integrations/custom-sentinelx.py:/var/ossec/integrations/custom-sentinelx.py:ro
       - sentinelx_wazuh_active_response:/var/ossec/active-response/bin
       - sentinelx_wazuh_agentless:/var/ossec/agentless
       - sentinelx_wazuh_wodles:/var/ossec/wodles

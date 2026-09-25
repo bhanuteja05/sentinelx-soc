@@ -346,3 +346,77 @@ def test_wazuh_events_ingest_route(auth_client, clean_db):
     assert data["ingested"] == 1
     assert data["duplicates"] == 0
     assert data["errors"] == 0
+
+
+def test_wazuh_events_ingest_integrator_wrapper_format(auth_client, clean_db):
+    """Verify push ingestion handles the native Wazuh integrator wrapper format: {'alert': {...}}."""
+    payload = {
+        "alert": {
+            "id": "integrator-event-201",
+            "timestamp": "2026-09-25T15:05:00+00:00",
+            "rule": {
+                "id": "502",
+                "level": 3,
+                "description": "Wazuh server started",
+                "groups": ["ossec"],
+            },
+            "agent": {"id": "000", "name": "wazuh.manager"},
+            "location": "wazuh-monitord",
+        }
+    }
+
+    resp = auth_client.post("/api/v1/wazuh/events", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert data["received"] == 1
+    assert data["ingested"] == 1
+    assert data["duplicates"] == 0
+    assert data["errors"] == 0
+
+    # Repeat submission: verify idempotency
+    resp_dup = auth_client.post("/api/v1/wazuh/events", json=payload)
+    assert resp_dup.status_code == 200
+    data_dup = resp_dup.json()
+    assert data_dup["received"] == 1
+    assert data_dup["ingested"] == 0
+    assert data_dup["duplicates"] == 1
+
+
+def test_service_pull_and_ingest(clean_db):
+    """Verify wazuh_service.pull_and_ingest fetches from client and persists to DB."""
+    mock_client = MagicMock()
+    mock_alerts = [
+        WazuhAlert(
+            id="pull-mock-1",
+            timestamp="2026-09-25T15:10:00+00:00",
+            rule_id="5715",
+            rule_level=5,
+            rule_description="SSH authentication success",
+        ),
+        WazuhAlert(
+            id="pull-mock-2",
+            timestamp="2026-09-25T15:11:00+00:00",
+            rule_id="5710",
+            rule_level=5,
+            rule_description="SSH unauthorized access",
+        ),
+    ]
+    mock_client.get_alerts.return_value = WazuhAlertsResponse(
+        total=2, count=2, alerts=mock_alerts
+    )
+
+    service = WazuhService(client=mock_client)
+    summary = service.pull_and_ingest(clean_db, limit=2)
+
+    assert summary.status == "ok"
+    assert summary.received == 2
+    assert summary.ingested == 2
+    assert summary.duplicates == 0
+    assert summary.errors == 0
+
+    # Repeat pull: should detect duplicates
+    summary_dup = service.pull_and_ingest(clean_db, limit=2)
+    assert summary_dup.received == 2
+    assert summary_dup.ingested == 0
+    assert summary_dup.duplicates == 2

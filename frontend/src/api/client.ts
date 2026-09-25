@@ -511,3 +511,48 @@ export async function fetchCaseAlerts(
     `/api/v1/cases/${caseId}/alerts${buildQuery(query as Record<string, string | number | undefined>)}`,
   )
 }
+
+// ── Enrichment types ─────────────────────────────────────────────────────────
+
+export type IOCIndicator = {
+  ioc_type: string
+  value: string
+  source_field: string | null
+}
+
+export type MITRETechnique = {
+  id: string
+  is_subtechnique: boolean
+  parent_id: string | null
+  name?: string
+  source_field?: string | null
+}
+
+export type MITRETactic = {
+  slug: string
+  is_known: boolean
+  source_field?: string | null
+}
+
+export type MITREEnrichment = {
+  techniques: MITRETechnique[]
+  tactics: MITRETactic[]
+}
+
+export type AlertEnrichmentResponse = {
+  alert_id: number
+  wazuh_alert_id: string
+  iocs: Record<string, string[]>
+  indicators: IOCIndicator[]
+  mitre: MITREEnrichment
+}
+
+export async function fetchAlertEnrichment(
+  alertId: number,
+  includePrivateIps = false,
+): Promise<AlertEnrichmentResponse> {
+  const query = includePrivateIps ? '?include_private_ips=true' : ''
+  return apiFetch<AlertEnrichmentResponse>(`/api/v1/alerts/${alertId}/enrich${query}`)
+}
+
+export const getAlertEnrichment = fetchAlertEnrichment
