@@ -16,6 +16,23 @@ from app.wazuh.scheduler import wazuh_scheduler
 wazuh_scheduler.settings = get_wazuh_settings()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def test_environment_lock():
+    """Create a lockfile during test session to prevent background scheduler interference."""
+    lock_path = "/tmp/.sentinelx_test_running"
+    try:
+        with open(lock_path, "w") as f:
+            f.write("1")
+    except Exception:
+        pass
+    yield
+    try:
+        if os.path.exists(lock_path):
+            os.remove(lock_path)
+    except Exception:
+        pass
+
+
 @pytest.fixture(scope="session")
 def engine():
     return _get_or_create_engine()
@@ -34,6 +51,6 @@ def db_session(engine) -> Generator[Session, None, None]:
 
 @pytest.fixture
 def clean_db(db_session: Session) -> Session:
-    db_session.execute(text("TRUNCATE TABLE users, alerts, cases, case_alerts, case_notes, triage_rules RESTART IDENTITY CASCADE"))
+    db_session.execute(text("TRUNCATE TABLE users, alerts, cases, case_alerts, case_notes, triage_rules, case_evidence RESTART IDENTITY CASCADE"))
     db_session.commit()
     return db_session

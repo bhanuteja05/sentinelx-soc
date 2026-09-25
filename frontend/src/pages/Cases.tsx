@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-
 import { Link } from 'react-router-dom'
 import {
   fetchCases,
@@ -7,6 +6,7 @@ import {
   type CasesQuery,
   type PaginatedCasesResponse,
 } from '../api/client'
+import { useAuth } from '../context/AuthContext'
 import { SeverityLabel } from '../components/SeverityBadge'
 import Pagination from '../components/Pagination'
 import Spinner from '../components/Spinner'
@@ -19,11 +19,16 @@ function formatTs(value: string | null | undefined): string {
 }
 
 type SortField = 'created_at' | 'updated_at' | 'severity' | 'status' | 'title'
+type QueueFilter = 'all' | 'mine' | 'unassigned'
 
 export default function Cases() {
+  const { user: currentUser } = useAuth()
   const [data, setData] = useState<PaginatedCasesResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Work Queue Tabs
+  const [queueTab, setQueueTab] = useState<QueueFilter>('all')
 
   // Filters
   const [status, setStatus] = useState<string>('')
@@ -44,6 +49,12 @@ export default function Cases() {
     if (status) query.status = status
     if (severity) query.severity = severity
 
+    if (queueTab === 'mine' && currentUser) {
+      query.assignee_id = currentUser.id
+    } else if (queueTab === 'unassigned') {
+      query.unassigned = true
+    }
+
     async function execute() {
       try {
         const resp = await fetchCases(query)
@@ -62,7 +73,7 @@ export default function Cases() {
     return () => {
       cancelled = true
     }
-  }, [status, severity, sortBy, sortOrder, page])
+  }, [status, severity, sortBy, sortOrder, page, queueTab, currentUser])
 
   function handleFilterSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -73,6 +84,7 @@ export default function Cases() {
   function handleClearFilters() {
     setStatus('')
     setSeverity('')
+    setQueueTab('all')
     setPage(1)
   }
 
@@ -96,7 +108,7 @@ export default function Cases() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Cases</h1>
-          <p className="page-subtitle">Security incident investigations</p>
+          <p className="page-subtitle">Security incident investigations & ownership</p>
         </div>
         <div className="header-actions">
           <Link to="/cases/new" className="btn btn-primary">
@@ -106,6 +118,31 @@ export default function Cases() {
       </div>
 
       {error && <ErrorBanner message={error} />}
+
+      {/* Work Queue Tabs */}
+      <div className="queue-tabs">
+        <button
+          type="button"
+          className={`queue-tab ${queueTab === 'all' ? 'active' : ''}`}
+          onClick={() => { setQueueTab('all'); setPage(1); }}
+        >
+          All Cases
+        </button>
+        <button
+          type="button"
+          className={`queue-tab ${queueTab === 'mine' ? 'active' : ''}`}
+          onClick={() => { setQueueTab('mine'); setPage(1); }}
+        >
+          👤 Assigned to Me
+        </button>
+        <button
+          type="button"
+          className={`queue-tab ${queueTab === 'unassigned' ? 'active' : ''}`}
+          onClick={() => { setQueueTab('unassigned'); setPage(1); }}
+        >
+          ⏳ Unassigned Backlog
+        </button>
+      </div>
 
       {/* Filter bar */}
       <form className="filter-bar" onSubmit={handleFilterSubmit}>
@@ -152,7 +189,7 @@ export default function Cases() {
       {loading ? (
         <Spinner label="Loading cases…" />
       ) : !data || data.items.length === 0 ? (
-        <div className="empty-state">No cases match the current query.</div>
+        <div className="empty-state">No cases match the current query or queue.</div>
       ) : (
         <>
           <div className="alerts-table-wrap">
@@ -169,6 +206,8 @@ export default function Cases() {
                   <th onClick={() => toggleSort('status')} className="sortable-th">
                     Status{sortIndicator('status')}
                   </th>
+                  <th>Assignee</th>
+                  <th>Evidence</th>
                   <th>Alerts</th>
                   <th onClick={() => toggleSort('created_at')} className="sortable-th">
                     Created{sortIndicator('created_at')}
@@ -190,8 +229,32 @@ export default function Cases() {
                     </td>
                     <td><SeverityLabel severity={c.severity} /></td>
                     <td>
-                      <span className={`status-badge status-${c.status}`}>
-                        {c.status}
+                      <div className="status-cell">
+                        <span className={`status-badge status-${c.status}`}>
+                          {c.status}
+                        </span>
+                        {c.disposition && (
+                          <span className="disposition-pill" title={`Root Cause: ${c.root_cause ?? 'N/A'}`}>
+                            {c.disposition === 'true_positive_incident' ? '⚠️ True Positive' :
+                             c.disposition === 'false_positive_benign' ? '🛡️ False Positive' : '🧪 Authorized'}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      {c.assignee ? (
+                        <span className="assignee-badge">
+                          @{c.assignee.username}
+                        </span>
+                      ) : (
+                        <span className="unassigned-badge">
+                          Unassigned
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <span className={`evidence-count-badge ${(c.evidence_count ?? 0) > 0 ? 'has-evidence' : ''}`}>
+                        {c.evidence_count ?? 0}
                       </span>
                     </td>
                     <td>{c.alert_count}</td>

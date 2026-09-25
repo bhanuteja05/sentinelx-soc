@@ -1,16 +1,24 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
+  addCaseEvidence,
+  assignCase,
   closeCase,
   createCaseNote,
   deleteCase,
+  deleteCaseEvidence,
   deleteCaseNote,
   detachAlertFromCase,
   fetchCaseById,
+  fetchCaseEvidence,
   fetchCaseNotes,
+  reopenCase,
+  resolveCase,
   updateCase,
+  updateCaseEvidence,
   updateCaseNote,
   type CaseDetailOut,
+  type CaseEvidence,
   type CaseNote,
   NotFoundError,
 } from '../api/client'
@@ -23,6 +31,33 @@ function formatTs(value: string | null | undefined): string {
   if (!value) return '—'
   const d = new Date(value)
   return isNaN(d.getTime()) ? value : d.toLocaleString()
+}
+
+const DISPOSITION_LABELS: Record<string, string> = {
+  true_positive_incident: 'True Positive — Incident Confirmed',
+  false_positive_benign: 'False Positive — Benign Alert',
+  benign_authorized_activity: 'Benign — Authorized Activity',
+}
+
+const ROOT_CAUSE_LABELS: Record<string, string> = {
+  malware_execution: 'Malware Execution',
+  credential_compromise: 'Credential Compromise',
+  privilege_escalation: 'Privilege Escalation',
+  unauthorized_access: 'Unauthorized Access',
+  misconfiguration: 'System Misconfiguration',
+  policy_violation: 'Policy Violation',
+  security_testing: 'Authorized Security Testing',
+}
+
+const EVIDENCE_TYPE_LABELS: Record<string, string> = {
+  ip: 'IP Address',
+  domain: 'Domain Name',
+  url: 'URL',
+  hash_sha256: 'SHA-256 Hash',
+  hash_md5: 'MD5 Hash',
+  file_path: 'File Path',
+  user_account: 'User Account',
+  host: 'Host / Endpoint',
 }
 
 export default function CaseDetail() {
@@ -58,12 +93,48 @@ export default function CaseDetail() {
   const [savingNoteEdit, setSavingNoteEdit] = useState(false)
   const [editNoteError, setEditNoteError] = useState<string | null>(null)
 
+  // Evidence state
+  const [evidence, setEvidence] = useState<CaseEvidence[]>([])
+  const [loadingEvidence, setLoadingEvidence] = useState(true)
+  const [evidenceError, setEvidenceError] = useState<string | null>(null)
+  const [verdictFilter, setVerdictFilter] = useState<string>('all')
+
+  // Add evidence modal state
+  const [showAddEvidenceModal, setShowAddEvidenceModal] = useState(false)
+  const [newEvType, setNewEvType] = useState('ip')
+  const [newEvValue, setNewEvValue] = useState('')
+  const [newEvVerdict, setNewEvVerdict] = useState<'malicious' | 'suspicious' | 'benign' | 'informational'>('suspicious')
+  const [newEvNotes, setNewEvNotes] = useState('')
+  const [addingEvidence, setAddingEvidence] = useState(false)
+  const [addEvidenceError, setAddEvidenceError] = useState<string | null>(null)
+
+  // Assignment modal / state
+  const [showAssignModal, setShowAssignModal] = useState(false)
+  const [assignTargetId, setAssignTargetId] = useState('')
+  const [assigning, setAssigning] = useState(false)
+  const [assignError, setAssignError] = useState<string | null>(null)
+
+  // Incident Resolution modal / state
+  const [showResolveModal, setShowResolveModal] = useState(false)
+  const [resDisposition, setResDisposition] = useState('true_positive_incident')
+  const [resRootCause, setResRootCause] = useState('unauthorized_access')
+  const [resSummary, setResSummary] = useState('')
+  const [resolving, setResolving] = useState(false)
+  const [resolveError, setResolveError] = useState<string | null>(null)
+
+  // Incident Reopen modal / state
+  const [showReopenModal, setShowReopenModal] = useState(false)
+  const [reopenReason, setReopenReason] = useState('')
+  const [reopening, setReopening] = useState(false)
+  const [reopenError, setReopenError] = useState<string | null>(null)
+
   async function reload() {
     if (!id) return
     try {
-      const [caseData, notesData] = await Promise.all([
+      const [caseData, notesData, evidenceData] = await Promise.all([
         fetchCaseById(Number(id)),
         fetchCaseNotes(Number(id)),
+        fetchCaseEvidence(Number(id)),
       ])
       setCase(caseData)
       setEditTitle(caseData.title)
@@ -71,6 +142,7 @@ export default function CaseDetail() {
       setEditStatus(caseData.status)
       setEditSeverity(caseData.severity)
       setNotes(notesData)
+      setEvidence(evidenceData)
     } catch (e) {
       if (e instanceof NotFoundError) {
         setError(`Case #${id} not found.`)
@@ -86,10 +158,12 @@ export default function CaseDetail() {
       if (!id) return
       setLoading(true)
       setLoadingNotes(true)
+      setLoadingEvidence(true)
       try {
-        const [caseData, notesData] = await Promise.all([
+        const [caseData, notesData, evidenceData] = await Promise.all([
           fetchCaseById(Number(id)),
           fetchCaseNotes(Number(id)),
+          fetchCaseEvidence(Number(id)),
         ])
         if (!cancelled) {
           setCase(caseData)
@@ -98,6 +172,7 @@ export default function CaseDetail() {
           setEditStatus(caseData.status)
           setEditSeverity(caseData.severity)
           setNotes(notesData)
+          setEvidence(evidenceData)
         }
       } catch (e) {
         if (!cancelled) {
@@ -111,6 +186,7 @@ export default function CaseDetail() {
         if (!cancelled) {
           setLoading(false)
           setLoadingNotes(false)
+          setLoadingEvidence(false)
         }
       }
     }
@@ -151,6 +227,7 @@ export default function CaseDetail() {
       setCase({ ...c, ...updated })
       setActionMsg('Case closed.')
       setTimeout(() => setActionMsg(null), 3000)
+      await reload()
     } catch (e) {
       setError(String(e))
     }
@@ -179,6 +256,194 @@ export default function CaseDetail() {
       setError(String(e))
     }
   }
+
+  // --- Assignment Handlers ---
+
+  async function handleClaimIncident() {
+    if (!c) return
+    setAssigning(true)
+    setAssignError(null)
+    try {
+      const updated = await assignCase(c.id, {})
+      setCase({ ...c, ...updated })
+      setActionMsg('Incident claimed and assigned to you.')
+      setTimeout(() => setActionMsg(null), 3000)
+      const updatedNotes = await fetchCaseNotes(c.id)
+      setNotes(updatedNotes)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setAssigning(false)
+    }
+  }
+
+  async function handleUnassignIncident() {
+    if (!c) return
+    if (!confirm(`Unassign Case #${c.id}? It will be returned to the unassigned backlog.`)) return
+    setAssigning(true)
+    setAssignError(null)
+    try {
+      const updated = await assignCase(c.id, { unassign: true })
+      setCase({ ...c, ...updated })
+      setActionMsg('Case returned to unassigned backlog.')
+      setTimeout(() => setActionMsg(null), 3000)
+      const updatedNotes = await fetchCaseNotes(c.id)
+      setNotes(updatedNotes)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setAssigning(false)
+    }
+  }
+
+  async function handleAssignSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!c) return
+    const target = parseInt(assignTargetId, 10)
+    if (isNaN(target)) {
+      setAssignError('Please enter a valid numeric User ID.')
+      return
+    }
+    setAssigning(true)
+    setAssignError(null)
+    try {
+      const updated = await assignCase(c.id, { assignee_id: target })
+      setCase({ ...c, ...updated })
+      setShowAssignModal(false)
+      setAssignTargetId('')
+      setActionMsg('Analyst assignment updated.')
+      setTimeout(() => setActionMsg(null), 3000)
+      const updatedNotes = await fetchCaseNotes(c.id)
+      setNotes(updatedNotes)
+    } catch (e) {
+      setAssignError(String(e))
+    } finally {
+      setAssigning(false)
+    }
+  }
+
+  // --- Resolution Handlers ---
+
+  async function handleResolveSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!c) return
+    const summary = resSummary.trim()
+    if (summary.length < 10) {
+      setResolveError('Resolution summary must be at least 10 characters.')
+      return
+    }
+    setResolving(true)
+    setResolveError(null)
+    try {
+      const updated = await resolveCase(c.id, {
+        disposition: resDisposition,
+        root_cause: resRootCause,
+        resolution_summary: summary,
+      })
+      setCase({ ...c, ...updated })
+      setShowResolveModal(false)
+      setResSummary('')
+      setActionMsg('Incident resolved successfully.')
+      setTimeout(() => setActionMsg(null), 3000)
+      const updatedNotes = await fetchCaseNotes(c.id)
+      setNotes(updatedNotes)
+    } catch (e) {
+      setResolveError(String(e))
+    } finally {
+      setResolving(false)
+    }
+  }
+
+  async function handleReopenSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!c) return
+    const reason = reopenReason.trim()
+    if (!reason) {
+      setReopenError('Reopening reason is required.')
+      return
+    }
+    setReopening(true)
+    setReopenError(null)
+    try {
+      const updated = await reopenCase(c.id, { reason })
+      setCase({ ...c, ...updated })
+      setShowReopenModal(false)
+      setReopenReason('')
+      setActionMsg('Incident reopened.')
+      setTimeout(() => setActionMsg(null), 3000)
+      const updatedNotes = await fetchCaseNotes(c.id)
+      setNotes(updatedNotes)
+    } catch (e) {
+      setReopenError(String(e))
+    } finally {
+      setReopening(false)
+    }
+  }
+
+  // --- Evidence Handlers ---
+
+  async function handleAddEvidenceSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!c) return
+    const val = newEvValue.trim()
+    if (!val) {
+      setAddEvidenceError('Evidence indicator value is required.')
+      return
+    }
+    setAddingEvidence(true)
+    setAddEvidenceError(null)
+    try {
+      const created = await addCaseEvidence(c.id, {
+        evidence_type: newEvType,
+        value: val,
+        verdict: newEvVerdict,
+        notes: newEvNotes.trim() || undefined,
+      })
+      setEvidence((prev) => [created, ...prev])
+      setShowAddEvidenceModal(false)
+      setNewEvValue('')
+      setNewEvNotes('')
+      setActionMsg(`Evidence "${created.value}" added to case.`)
+      setTimeout(() => setActionMsg(null), 3000)
+      const updatedNotes = await fetchCaseNotes(c.id)
+      setNotes(updatedNotes)
+    } catch (e) {
+      setAddEvidenceError(String(e))
+    } finally {
+      setAddingEvidence(false)
+    }
+  }
+
+  async function handleVerdictChange(evId: number, newVerdict: 'malicious' | 'suspicious' | 'benign' | 'informational') {
+    if (!c) return
+    try {
+      const updated = await updateCaseEvidence(c.id, evId, { verdict: newVerdict })
+      setEvidence((prev) => prev.map((item) => (item.id === evId ? updated : item)))
+      setActionMsg(`Evidence verdict updated to ${newVerdict}.`)
+      setTimeout(() => setActionMsg(null), 3000)
+      const updatedNotes = await fetchCaseNotes(c.id)
+      setNotes(updatedNotes)
+    } catch (e) {
+      setEvidenceError(String(e))
+    }
+  }
+
+  async function handleDeleteEvidence(evId: number, val: string) {
+    if (!c) return
+    if (!confirm(`Delete evidence artifact "${val}" from this case?`)) return
+    try {
+      await deleteCaseEvidence(c.id, evId)
+      setEvidence((prev) => prev.filter((item) => item.id !== evId))
+      setActionMsg(`Evidence "${val}" removed.`)
+      setTimeout(() => setActionMsg(null), 3000)
+      const updatedNotes = await fetchCaseNotes(c.id)
+      setNotes(updatedNotes)
+    } catch (e) {
+      setEvidenceError(String(e))
+    }
+  }
+
+  // --- Note Handlers ---
 
   async function handleAddNote(e: React.FormEvent) {
     e.preventDefault()
@@ -251,6 +516,11 @@ export default function CaseDetail() {
     }
   }
 
+  // Filter evidence
+  const filteredEvidence = verdictFilter === 'all'
+    ? evidence
+    : evidence.filter((ev) => ev.verdict === verdictFilter)
+
   if (loading) return <Spinner label="Loading case detail…" />
   if (error) return (
     <div className="page">
@@ -262,6 +532,9 @@ export default function CaseDetail() {
   )
   if (!c) return null
 
+  const isResolvedOrClosed = c.status === 'resolved' || c.status === 'closed'
+  const isAssignedToCurrentUser = c.assignee_id === user?.id
+
   return (
     <div className="page">
       <div className="page-header page-header--split">
@@ -272,19 +545,52 @@ export default function CaseDetail() {
           <h1 className="page-title">{c.title}</h1>
         </div>
         <div className="header-actions">
-          {c.status !== 'closed' && (
-            <button className="btn btn-secondary" onClick={handleCloseCase}>
-              Close Case
+          {!isResolvedOrClosed ? (
+            <>
+              <button
+                type="button"
+                className="btn btn-success"
+                onClick={() => setShowResolveModal(true)}
+              >
+                ✓ Resolve Incident
+              </button>
+              {!isAssignedToCurrentUser && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleClaimIncident}
+                  disabled={assigning}
+                >
+                  👤 Claim Incident
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleCloseCase}
+              >
+                Close Case
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowReopenModal(true)}
+            >
+              🔄 Reopen Incident
             </button>
           )}
+
           <button
+            type="button"
             className="btn btn-secondary"
             onClick={() => setIsEditing(!isEditing)}
           >
             {isEditing ? 'Cancel Edit' : 'Edit Case'}
           </button>
           {user?.role === 'admin' && (
-            <button className="btn btn-danger" onClick={handleDeleteCase}>
+            <button type="button" className="btn btn-danger" onClick={handleDeleteCase}>
               Delete Case
             </button>
           )}
@@ -292,6 +598,104 @@ export default function CaseDetail() {
       </div>
 
       {actionMsg && <div className="success-banner">{actionMsg}</div>}
+
+      {/* Incident Ownership Bar */}
+      <div className="ownership-bar">
+        <div className="ownership-left">
+          <span className="ownership-label">Assigned Analyst:</span>
+          {c.assignee ? (
+            <div className="assignee-active">
+              <span className="assignee-avatar">👤</span>
+              <span className="assignee-name">{c.assignee.username}</span>
+              <span className={`role-badge role-${c.assignee.role}`}>{c.assignee.role}</span>
+              {isAssignedToCurrentUser && (
+                <span className="assignee-you-tag">(You)</span>
+              )}
+            </div>
+          ) : (
+            <span className="unassigned-badge">⏳ Unassigned Backlog</span>
+          )}
+        </div>
+        <div className="ownership-actions">
+          {!isAssignedToCurrentUser && (
+            <button
+              type="button"
+              className="btn btn-xs btn-primary"
+              onClick={handleClaimIncident}
+              disabled={assigning}
+            >
+              Claim (Assign to Me)
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn-xs btn-secondary"
+            onClick={() => setShowAssignModal(true)}
+          >
+            Reassign
+          </button>
+          {c.assignee && (
+            <button
+              type="button"
+              className="btn btn-xs btn-secondary"
+              onClick={handleUnassignIncident}
+              disabled={assigning}
+            >
+              Unassign
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Resolution Banner */}
+      {isResolvedOrClosed && (
+        <div className="resolution-banner">
+          <div className="resolution-header">
+            <div className="resolution-title">
+              <span className="resolution-icon">✓</span>
+              <span>Incident Resolution Details</span>
+              <span className={`status-badge status-${c.status}`}>{c.status}</span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-xs btn-secondary"
+              onClick={() => setShowReopenModal(true)}
+            >
+              🔄 Reopen Incident
+            </button>
+          </div>
+          <div className="resolution-grid">
+            <div>
+              <span className="res-field-label">Disposition</span>
+              <span className="res-field-value res-highlight">
+                {c.disposition ? (DISPOSITION_LABELS[c.disposition] ?? c.disposition) : '—'}
+              </span>
+            </div>
+            <div>
+              <span className="res-field-label">Root Cause</span>
+              <span className="res-field-value">
+                {c.root_cause ? (ROOT_CAUSE_LABELS[c.root_cause] ?? c.root_cause) : '—'}
+              </span>
+            </div>
+            <div>
+              <span className="res-field-label">Resolved By</span>
+              <span className="res-field-value">
+                {c.resolved_by ? c.resolved_by.username : '—'}
+              </span>
+            </div>
+            <div>
+              <span className="res-field-label">Resolved At</span>
+              <span className="res-field-value">{formatTs(c.resolved_at)}</span>
+            </div>
+          </div>
+          {c.resolution_summary && (
+            <div className="resolution-summary-box">
+              <span className="res-field-label">Resolution Summary:</span>
+              <p className="resolution-summary-text">{c.resolution_summary}</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Edit Form */}
       {isEditing && (
@@ -367,6 +771,8 @@ export default function CaseDetail() {
             <div><dt>Case ID</dt><dd>#{c.id}</dd></div>
             <div><dt>Status</dt><dd><span className={`status-badge status-${c.status}`}>{c.status}</span></dd></div>
             <div><dt>Severity</dt><dd><SeverityLabel severity={c.severity} /></dd></div>
+            <div><dt>Assignee</dt><dd>{c.assignee ? c.assignee.username : <span className="text-muted">Unassigned</span>}</dd></div>
+            <div><dt>Evidence Items</dt><dd>{evidence.length}</dd></div>
             <div><dt>Associated Alerts</dt><dd>{c.alert_count}</dd></div>
             <div><dt>Created</dt><dd>{formatTs(c.created_at)}</dd></div>
             <div><dt>Last Updated</dt><dd>{formatTs(c.updated_at)}</dd></div>
@@ -381,10 +787,159 @@ export default function CaseDetail() {
         </div>
       </div>
 
+      {/* Evidence / Artifact Locker Section */}
+      <section className="dash-section">
+        <div className="section-header">
+          <div className="section-header-left">
+            <h2>Evidence Locker ({evidence.length})</h2>
+            <div className="verdict-filter-group">
+              <button
+                type="button"
+                className={`filter-chip ${verdictFilter === 'all' ? 'active' : ''}`}
+                onClick={() => setVerdictFilter('all')}
+              >
+                All ({evidence.length})
+              </button>
+              <button
+                type="button"
+                className={`filter-chip verdict-chip-malicious ${verdictFilter === 'malicious' ? 'active' : ''}`}
+                onClick={() => setVerdictFilter('malicious')}
+              >
+                Malicious ({evidence.filter((e) => e.verdict === 'malicious').length})
+              </button>
+              <button
+                type="button"
+                className={`filter-chip verdict-chip-suspicious ${verdictFilter === 'suspicious' ? 'active' : ''}`}
+                onClick={() => setVerdictFilter('suspicious')}
+              >
+                Suspicious ({evidence.filter((e) => e.verdict === 'suspicious').length})
+              </button>
+              <button
+                type="button"
+                className={`filter-chip verdict-chip-benign ${verdictFilter === 'benign' ? 'active' : ''}`}
+                onClick={() => setVerdictFilter('benign')}
+              >
+                Benign ({evidence.filter((e) => e.verdict === 'benign').length})
+              </button>
+              <button
+                type="button"
+                className={`filter-chip verdict-chip-informational ${verdictFilter === 'informational' ? 'active' : ''}`}
+                onClick={() => setVerdictFilter('informational')}
+              >
+                Info ({evidence.filter((e) => e.verdict === 'informational').length})
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            onClick={() => setShowAddEvidenceModal(true)}
+          >
+            + Catalog Evidence
+          </button>
+        </div>
+
+        {evidenceError && <ErrorBanner message={evidenceError} />}
+
+        {loadingEvidence ? (
+          <Spinner label="Loading evidence locker…" />
+        ) : filteredEvidence.length === 0 ? (
+          <div className="empty-evidence-box">
+            <span className="empty-icon">📁</span>
+            <p>
+              {verdictFilter === 'all'
+                ? 'No evidence artifacts cataloged in this incident locker yet.'
+                : `No evidence items with verdict "${verdictFilter}".`}
+            </p>
+            {verdictFilter === 'all' && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowAddEvidenceModal(true)}
+              >
+                Catalog First Evidence
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="table-responsive">
+            <table className="alerts-table">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Indicator / Artifact Value</th>
+                  <th>Verdict</th>
+                  <th>Analyst Notes</th>
+                  <th>Source / Added By</th>
+                  <th>Recorded At</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredEvidence.map((ev) => (
+                  <tr key={ev.id}>
+                    <td>
+                      <span className="evidence-type-badge">
+                        {EVIDENCE_TYPE_LABELS[ev.evidence_type] ?? ev.evidence_type}
+                      </span>
+                    </td>
+                    <td className="mono mono-strong">{ev.value}</td>
+                    <td>
+                      <select
+                        className={`verdict-select verdict-${ev.verdict}`}
+                        value={ev.verdict}
+                        onChange={(e) =>
+                          void handleVerdictChange(
+                            ev.id,
+                            e.target.value as 'malicious' | 'suspicious' | 'benign' | 'informational',
+                          )
+                        }
+                      >
+                        <option value="malicious">Malicious</option>
+                        <option value="suspicious">Suspicious</option>
+                        <option value="benign">Benign</option>
+                        <option value="informational">Informational</option>
+                      </select>
+                    </td>
+                    <td>
+                      <span className="evidence-notes-text">
+                        {ev.notes ?? <span className="text-muted">—</span>}
+                      </span>
+                    </td>
+                    <td>
+                      {ev.alert_id ? (
+                        <Link to={`/alerts/${ev.alert_id}`} className="table-link">
+                          Alert #{ev.alert_id}
+                        </Link>
+                      ) : ev.added_by ? (
+                        <span>{ev.added_by.username}</span>
+                      ) : (
+                        <span className="text-muted">Manual</span>
+                      )}
+                    </td>
+                    <td>{formatTs(ev.created_at)}</td>
+                    <td className="cell-actions">
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-danger"
+                        title="Delete evidence artifact"
+                        onClick={() => void handleDeleteEvidence(ev.id, ev.value)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
       {/* Investigation Notes & Timeline */}
       <section className="dash-section">
         <div className="section-header">
-          <h2>Investigation Notes ({notes.length})</h2>
+          <h2>Investigation Notes & Audit Timeline ({notes.length})</h2>
         </div>
 
         {/* Add Note Card */}
@@ -431,6 +986,24 @@ export default function CaseDetail() {
               const canDelete = isAuthor || user?.role === 'admin'
               const isEditingThisNote = editingNoteId === note.id
 
+              // Determine audit tag
+              let auditBadge = null
+              if (note.content.startsWith('[Case Assignment]')) {
+                auditBadge = <span className="role-badge note-tag-assignment">👤 Assignment</span>
+              } else if (note.content.startsWith('[Evidence')) {
+                auditBadge = <span className="role-badge note-tag-evidence">📌 Evidence Locker</span>
+              } else if (note.content.startsWith('[Incident Resolved]')) {
+                auditBadge = <span className="role-badge note-tag-resolved">✓ Resolved</span>
+              } else if (note.content.startsWith('[Incident Reopened]')) {
+                auditBadge = <span className="role-badge note-tag-reopened">🔄 Reopened</span>
+              } else if (note.content.startsWith('[Automated Triage]')) {
+                auditBadge = <span className="role-badge triage-badge">⚡ Automated Triage</span>
+              } else if (note.content.startsWith('[Alert Attached]') || note.content.startsWith('[Alert Detached]')) {
+                auditBadge = <span className="role-badge note-tag-correlation">🔗 Correlation</span>
+              } else if (note.author_username === 'system') {
+                auditBadge = <span className="role-badge note-tag-system">⚙ System</span>
+              }
+
               return (
                 <div key={note.id} className="timeline-item">
                   <div className="timeline-marker" />
@@ -443,11 +1016,7 @@ export default function CaseDetail() {
                             {note.author.role}
                           </span>
                         )}
-                        {(note.content.startsWith('[Automated Triage]') || note.author_username === 'system') && (
-                          <span className="role-badge triage-badge">
-                            ⚡ Automated Triage
-                          </span>
-                        )}
+                        {auditBadge}
                         <span className="timeline-time">{formatTs(note.created_at)}</span>
                         {note.updated_at !== note.created_at && (
                           <span className="timeline-edited" title={`Edited ${formatTs(note.updated_at)}`}>
@@ -553,6 +1122,7 @@ export default function CaseDetail() {
                         Investigate
                       </Link>
                       <button
+                        type="button"
                         className="btn btn-xs btn-danger"
                         onClick={() => handleDetachAlert(alert.id)}
                       >
@@ -566,6 +1136,307 @@ export default function CaseDetail() {
           </div>
         )}
       </section>
+
+      {/* --- MODALS --- */}
+
+      {/* Add Evidence Modal */}
+      {showAddEvidenceModal && (
+        <div className="modal-backdrop">
+          <div className="modal-box">
+            <div className="modal-header">
+              <h3>Catalog Evidence Artifact</h3>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setShowAddEvidenceModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            {addEvidenceError && <ErrorBanner message={addEvidenceError} />}
+            <form onSubmit={handleAddEvidenceSubmit}>
+              <div className="form-group">
+                <label htmlFor="ev-type">Evidence Type</label>
+                <select
+                  id="ev-type"
+                  value={newEvType}
+                  onChange={(e) => setNewEvType(e.target.value)}
+                >
+                  <option value="ip">IP Address</option>
+                  <option value="domain">Domain Name</option>
+                  <option value="url">URL</option>
+                  <option value="hash_sha256">SHA-256 Hash</option>
+                  <option value="hash_md5">MD5 Hash</option>
+                  <option value="file_path">File Path</option>
+                  <option value="user_account">User Account</option>
+                  <option value="host">Host / Computer</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="ev-value">Indicator / Value</label>
+                <input
+                  id="ev-value"
+                  type="text"
+                  required
+                  placeholder="e.g. 198.51.100.23, malware.exe, admin_test"
+                  value={newEvValue}
+                  onChange={(e) => setNewEvValue(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="ev-verdict">Analyst Verdict</label>
+                <select
+                  id="ev-verdict"
+                  value={newEvVerdict}
+                  onChange={(e) =>
+                    setNewEvVerdict(
+                      e.target.value as 'malicious' | 'suspicious' | 'benign' | 'informational',
+                    )
+                  }
+                >
+                  <option value="malicious">Malicious (Confirmed threat)</option>
+                  <option value="suspicious">Suspicious (Requires validation)</option>
+                  <option value="benign">Benign (Legitimate activity)</option>
+                  <option value="informational">Informational (Context / telemetry)</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="ev-notes">Forensic Context / Notes</label>
+                <textarea
+                  id="ev-notes"
+                  rows={2}
+                  placeholder="Optional analyst commentary or correlation note"
+                  value={newEvNotes}
+                  onChange={(e) => setNewEvNotes(e.target.value)}
+                />
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowAddEvidenceModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={addingEvidence || !newEvValue.trim()}
+                >
+                  {addingEvidence ? 'Cataloging…' : 'Catalog Evidence'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Assign Incident Modal */}
+      {showAssignModal && (
+        <div className="modal-backdrop">
+          <div className="modal-box">
+            <div className="modal-header">
+              <h3>Reassign Incident #{c.id}</h3>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setShowAssignModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            {assignError && <ErrorBanner message={assignError} />}
+            <form onSubmit={handleAssignSubmit}>
+              <p className="modal-desc">
+                Assign this incident to another SOC analyst by entering their user ID, or claim it for yourself.
+              </p>
+              <div className="form-group">
+                <label htmlFor="assign-id">Target Analyst User ID</label>
+                <input
+                  id="assign-id"
+                  type="number"
+                  required
+                  placeholder="e.g. 1"
+                  value={assignTargetId}
+                  onChange={(e) => setAssignTargetId(e.target.value)}
+                />
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowAssignModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleClaimIncident}
+                  disabled={assigning}
+                >
+                  Assign to Me
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={assigning || !assignTargetId.trim()}
+                >
+                  {assigning ? 'Assigning…' : 'Reassign Incident'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Resolve Incident Modal */}
+      {showResolveModal && (
+        <div className="modal-backdrop">
+          <div className="modal-box modal-box--large">
+            <div className="modal-header">
+              <h3>Resolve Incident #{c.id}</h3>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setShowResolveModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            {resolveError && <ErrorBanner message={resolveError} />}
+            <form onSubmit={handleResolveSubmit}>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="res-disp">Incident Disposition</label>
+                  <select
+                    id="res-disp"
+                    value={resDisposition}
+                    onChange={(e) => setResDisposition(e.target.value)}
+                  >
+                    <option value="true_positive_incident">
+                      True Positive — Incident Confirmed
+                    </option>
+                    <option value="false_positive_benign">
+                      False Positive — Benign Alert
+                    </option>
+                    <option value="benign_authorized_activity">
+                      Benign — Authorized Activity
+                    </option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="res-cause">Root Cause Analysis</label>
+                  <select
+                    id="res-cause"
+                    value={resRootCause}
+                    onChange={(e) => setResRootCause(e.target.value)}
+                  >
+                    <option value="unauthorized_access">Unauthorized Access</option>
+                    <option value="malware_execution">Malware Execution</option>
+                    <option value="credential_compromise">Credential Compromise</option>
+                    <option value="privilege_escalation">Privilege Escalation</option>
+                    <option value="misconfiguration">System Misconfiguration</option>
+                    <option value="policy_violation">Policy Violation</option>
+                    <option value="security_testing">Authorized Security Testing</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="res-summary">Resolution Summary & Remediation Notes (min 10 characters)</label>
+                <textarea
+                  id="res-summary"
+                  rows={4}
+                  required
+                  minLength={10}
+                  placeholder="Detail containment actions taken, remediation steps, root cause confirmation, or false-positive rationale..."
+                  value={resSummary}
+                  onChange={(e) => setResSummary(e.target.value)}
+                />
+                <div className="char-count">
+                  {resSummary.length} characters (minimum 10)
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowResolveModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-success"
+                  disabled={resolving || resSummary.trim().length < 10}
+                >
+                  {resolving ? 'Resolving…' : '✓ Confirm Resolution'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reopen Incident Modal */}
+      {showReopenModal && (
+        <div className="modal-backdrop">
+          <div className="modal-box">
+            <div className="modal-header">
+              <h3>Reopen Incident #{c.id}</h3>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setShowReopenModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            {reopenError && <ErrorBanner message={reopenError} />}
+            <form onSubmit={handleReopenSubmit}>
+              <p className="modal-desc">
+                Reopening this incident will transition status back to <strong>in_progress</strong> and record an audit log with your justification.
+              </p>
+              <div className="form-group">
+                <label htmlFor="reopen-reason">Reopening Justification / Reason</label>
+                <textarea
+                  id="reopen-reason"
+                  rows={3}
+                  required
+                  placeholder="State why this incident is being reopened (e.g. recurrence of alerts, new forensic evidence, post-incident findings)..."
+                  value={reopenReason}
+                  onChange={(e) => setReopenReason(e.target.value)}
+                />
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowReopenModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={reopening || !reopenReason.trim()}
+                >
+                  {reopening ? 'Reopening…' : '🔄 Confirm Reopen'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

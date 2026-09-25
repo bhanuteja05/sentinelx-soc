@@ -110,19 +110,73 @@ export type AlertsQuery = {
 
 // ── Case types ───────────────────────────────────────────────────────────────
 
+export type UserSummary = {
+  id: number
+  username: string
+  email: string
+  role: string
+}
+
+export type CaseEvidence = {
+  id: number
+  case_id: number
+  alert_id?: number | null
+  evidence_type: string
+  value: string
+  verdict: 'malicious' | 'suspicious' | 'benign' | 'informational'
+  notes?: string | null
+  added_by_id?: number | null
+  added_by?: UserSummary | null
+  created_at: string
+  updated_at: string
+}
+
+export type CreateCaseEvidenceBody = {
+  evidence_type: string
+  value: string
+  verdict?: 'malicious' | 'suspicious' | 'benign' | 'informational'
+  notes?: string
+  alert_id?: number
+}
+
+export type UpdateCaseEvidenceBody = {
+  verdict?: 'malicious' | 'suspicious' | 'benign' | 'informational'
+  notes?: string
+}
+
+export type ResolveCaseBody = {
+  disposition: string
+  root_cause: string
+  resolution_summary: string
+}
+
+export type ReopenCaseBody = {
+  reason: string
+}
+
 export type CaseOut = {
   id: number
   title: string
   description: string | null
   status: string
   severity: string
+  assignee_id?: number | null
+  assignee?: UserSummary | null
+  disposition?: string | null
+  root_cause?: string | null
+  resolution_summary?: string | null
+  resolved_at?: string | null
+  resolved_by_id?: number | null
+  resolved_by?: UserSummary | null
   created_at: string
   updated_at: string
   alert_count: number
+  evidence_count?: number
 }
 
 export type CaseDetailOut = CaseOut & {
   alerts: AlertOut[]
+  evidence: CaseEvidence[]
 }
 
 export type PaginatedCasesResponse = {
@@ -140,6 +194,8 @@ export type CasesQuery = {
   sort_order?: 'asc' | 'desc'
   status?: string
   severity?: string
+  assignee_id?: number
+  unassigned?: boolean
 }
 
 export type CreateCaseBody = {
@@ -147,6 +203,7 @@ export type CreateCaseBody = {
   description?: string
   severity?: string
   status?: string
+  assignee_id?: number
 }
 
 export type UpdateCaseBody = {
@@ -154,6 +211,8 @@ export type UpdateCaseBody = {
   description?: string
   status?: string
   severity?: string
+  assignee_id?: number
+  clear_assignee?: boolean
 }
 
 export type CaseAlertAssociationOut = {
@@ -504,6 +563,70 @@ export async function updateCase(
 
 export async function closeCase(id: number): Promise<CaseOut> {
   return apiFetch<CaseOut>(`/api/v1/cases/${id}/close`, { method: 'POST' })
+}
+
+export async function assignCase(
+  caseId: number,
+  body: { assignee_id?: number | null; unassign?: boolean } = {},
+): Promise<CaseOut> {
+  return apiFetch<CaseOut>(`/api/v1/cases/${caseId}/assign`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function resolveCase(
+  caseId: number,
+  body: ResolveCaseBody,
+): Promise<CaseOut> {
+  return apiFetch<CaseOut>(`/api/v1/cases/${caseId}/resolve`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function reopenCase(
+  caseId: number,
+  body: ReopenCaseBody,
+): Promise<CaseOut> {
+  return apiFetch<CaseOut>(`/api/v1/cases/${caseId}/reopen`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function fetchCaseEvidence(caseId: number): Promise<CaseEvidence[]> {
+  return apiFetch<CaseEvidence[]>(`/api/v1/cases/${caseId}/evidence`)
+}
+
+export async function addCaseEvidence(
+  caseId: number,
+  body: CreateCaseEvidenceBody,
+): Promise<CaseEvidence> {
+  return apiFetch<CaseEvidence>(`/api/v1/cases/${caseId}/evidence`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function updateCaseEvidence(
+  caseId: number,
+  evidenceId: number,
+  body: UpdateCaseEvidenceBody,
+): Promise<CaseEvidence> {
+  return apiFetch<CaseEvidence>(`/api/v1/cases/${caseId}/evidence/${evidenceId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function deleteCaseEvidence(
+  caseId: number,
+  evidenceId: number,
+): Promise<void> {
+  return apiFetch<void>(`/api/v1/cases/${caseId}/evidence/${evidenceId}`, {
+    method: 'DELETE',
+  })
 }
 
 export async function deleteCase(id: number): Promise<void> {

@@ -11,6 +11,7 @@ import asyncio
 from collections.abc import Callable
 from datetime import datetime, timezone
 import logging
+import os
 import threading
 import time
 
@@ -74,6 +75,11 @@ class WazuhIngestionScheduler:
 
     def run_cycle(self) -> WazuhIngestSummary | None:
         """Execute a single ingestion cycle with concurrency protection and failure isolation."""
+        if getattr(self, "is_default_singleton", False) and os.path.exists("/tmp/.sentinelx_test_running"):
+            self.skipped_cycles += 1
+            logger.info("Wazuh ingestion cycle skipped: test execution in progress.")
+            return None
+
         acquired = self._cycle_lock.acquire(blocking=False)
         if not acquired:
             self.skipped_cycles += 1
@@ -216,3 +222,4 @@ class WazuhIngestionScheduler:
 
 
 wazuh_scheduler = WazuhIngestionScheduler()
+wazuh_scheduler.is_default_singleton = True

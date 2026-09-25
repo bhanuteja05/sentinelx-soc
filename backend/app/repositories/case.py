@@ -40,6 +40,8 @@ def search_cases(
     page_size: int = 25,
     status: str | None = None,
     severity: str | None = None,
+    assignee_id: int | None = None,
+    unassigned: bool | None = None,
     sort_by: str = "created_at",
     sort_order: str = "desc",
 ) -> tuple[list[Case], int]:
@@ -49,6 +51,10 @@ def search_cases(
         clauses.append(Case.status == status)
     if severity is not None:
         clauses.append(Case.severity == severity)
+    if unassigned is True:
+        clauses.append(Case.assignee_id.is_(None))
+    elif assignee_id is not None:
+        clauses.append(Case.assignee_id == assignee_id)
 
     # 1. Total filtered count
     count_stmt = select(func.count(Case.id))

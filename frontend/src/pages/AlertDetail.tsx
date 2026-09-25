@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
+  addCaseEvidence,
   fetchAlertById,
+  fetchCases,
   getAlertEnrichment,
   type AlertDetailOut,
   type AlertEnrichmentResponse,
+  type CaseOut,
   type IOCIndicator,
   NotFoundError,
 } from '../api/client'
@@ -29,6 +32,17 @@ const IOC_CATEGORIES: { type: string; label: string }[] = [
   { type: 'sha256', label: 'SHA256 Hashes' },
 ]
 
+function mapIocToEvidenceType(iocType: string): string {
+  const t = iocType.toLowerCase()
+  if (t === 'ipv4' || t === 'ipv6') return 'ip'
+  if (t === 'domain') return 'domain'
+  if (t === 'url') return 'url'
+  if (t === 'sha256') return 'hash_sha256'
+  if (t === 'md5') return 'hash_md5'
+  if (t === 'email') return 'user_account'
+  return 'ip'
+}
+
 export default function AlertDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -36,12 +50,23 @@ export default function AlertDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showRaw, setShowRaw] = useState(false)
+  const [actionSuccess, setActionSuccess] = useState<{ msg: string; caseId?: number } | null>(null)
 
   // Enrichment state
   const [enrichment, setEnrichment] = useState<AlertEnrichmentResponse | null>(null)
   const [enrichmentLoading, setEnrichmentLoading] = useState(true)
   const [enrichmentError, setEnrichmentError] = useState<string | null>(null)
   const [includePrivateIps, setIncludePrivateIps] = useState(false)
+
+  // Promote IOC to Evidence Modal State
+  const [promotingIoc, setPromotingIoc] = useState<{ type: string; value: string } | null>(null)
+  const [promoteCaseId, setPromoteCaseId] = useState<string>('')
+  const [promoteEvidenceType, setPromoteEvidenceType] = useState<string>('ip')
+  const [promoteVerdict, setPromoteVerdict] = useState<'malicious' | 'suspicious' | 'benign' | 'informational'>('suspicious')
+  const [promoteNotes, setPromoteNotes] = useState<string>('')
+  const [recentCases, setRecentCases] = useState<CaseOut[]>([])
+  const [promoting, setPromoting] = useState(false)
+  const [promoteError, setPromoteError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -126,6 +151,57 @@ export default function AlertDetail() {
   const mitreTechniques = enrichment?.mitre?.techniques ?? []
   const hasMitre = mitreTactics.length > 0 || mitreTechniques.length > 0
 
+  async function handleOpenPromoteModal(iocType: string, value: string) {
+    const mapped = mapIocToEvidenceType(iocType)
+    setPromotingIoc({ type: iocType, value })
+    setPromoteEvidenceType(mapped)
+    setPromoteVerdict('suspicious')
+    setPromoteNotes(`Promoted from Alert #${id} (${alert?.description ?? 'Wazuh Alert'})`)
+    setPromoteError(null)
+
+    // Load recent active cases for convenient selection
+    try {
+      const resp = await fetchCases({ page: 1, page_size: 20, sort_by: 'updated_at', sort_order: 'desc' })
+      setRecentCases(resp.items)
+      if (resp.items.length > 0 && !promoteCaseId) {
+        setPromoteCaseId(String(resp.items[0].id))
+      }
+    } catch {
+      // Continue even if case list fails
+    }
+  }
+
+  async function handlePromoteSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!alert || !promotingIoc) return
+    const caseIdNum = parseInt(promoteCaseId, 10)
+    if (isNaN(caseIdNum) || caseIdNum <= 0) {
+      setPromoteError('Please select or specify a valid Case ID.')
+      return
+    }
+    setPromoting(true)
+    setPromoteError(null)
+    try {
+      await addCaseEvidence(caseIdNum, {
+        evidence_type: promoteEvidenceType,
+        value: promotingIoc.value,
+        verdict: promoteVerdict,
+        notes: promoteNotes.trim() || undefined,
+        alert_id: alert.id,
+      })
+      setActionSuccess({
+        msg: `Promoted "${promotingIoc.value}" to Evidence in Case #${caseIdNum}`,
+        caseId: caseIdNum,
+      })
+      setPromotingIoc(null)
+      setTimeout(() => setActionSuccess(null), 5000)
+    } catch (e) {
+      setPromoteError(String(e))
+    } finally {
+      setPromoting(false)
+    }
+  }
+
   if (loading) return <Spinner label="Loading alert detail…" />
   if (error) return (
     <div className="page">
@@ -155,6 +231,17 @@ export default function AlertDetail() {
           </Link>
         </div>
       </div>
+
+      {actionSuccess && (
+        <div className="success-banner">
+          <span>{actionSuccess.msg}</span>
+          {actionSuccess.caseId && (
+            <Link to={`/cases/${actionSuccess.caseId}`} className="banner-link">
+              View Case #{actionSuccess.caseId} →
+            </Link>
+          )}
+        </div>
+      )}
 
       {/* Metadata Grid */}
       <div className="meta-grid">
@@ -236,6 +323,7 @@ export default function AlertDetail() {
           <div className="enrichment-error-card">
             <ErrorBanner message={`Enrichment service error: ${enrichmentError}`} />
             <button
+              type="button"
               className="btn btn-secondary btn-xs"
               onClick={() => {
                 setEnrichmentLoading(true)
@@ -286,12 +374,22 @@ export default function AlertDetail() {
                       <ul className="ioc-list">
                         {items.map((ind, idx) => (
                           <li key={`${ind.value}-${idx}`} className="ioc-item">
-                            <span className="ioc-value mono">{ind.value}</span>
-                            {ind.source_field ? (
-                              <span className="ioc-source" title={`Extracted from: ${ind.source_field}`}>
-                                source: {ind.source_field}
-                              </span>
-                            ) : null}
+                            <div className="ioc-item-content">
+                              <span className="ioc-value mono">{ind.value}</span>
+                              {ind.source_field ? (
+                                <span className="ioc-source" title={`Extracted from: ${ind.source_field}`}>
+                                  source: {ind.source_field}
+                                </span>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-xs btn-secondary promote-btn"
+                              title="Promote indicator to Case Evidence Locker"
+                              onClick={() => void handleOpenPromoteModal(ind.ioc_type, ind.value)}
+                            >
+                              + Promote to Evidence
+                            </button>
                           </li>
                         ))}
                       </ul>
@@ -366,6 +464,7 @@ export default function AlertDetail() {
       {/* Raw Alert JSON */}
       <section className="raw-alert-section">
         <button
+          type="button"
           className="btn btn-secondary raw-toggle-btn"
           onClick={() => setShowRaw(!showRaw)}
         >
@@ -377,6 +476,122 @@ export default function AlertDetail() {
           </pre>
         )}
       </section>
+
+      {/* Promote to Evidence Modal */}
+      {promotingIoc && (
+        <div className="modal-backdrop">
+          <div className="modal-box">
+            <div className="modal-header">
+              <h3>Promote IOC to Incident Evidence</h3>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setPromotingIoc(null)}
+              >
+                ✕
+              </button>
+            </div>
+            {promoteError && <ErrorBanner message={promoteError} />}
+            <form onSubmit={handlePromoteSubmit}>
+              <div className="form-group">
+                <label>Indicator Value</label>
+                <div className="mono mono-strong readonly-box">{promotingIoc.value}</div>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="p-type">Evidence Type</label>
+                  <select
+                    id="p-type"
+                    value={promoteEvidenceType}
+                    onChange={(e) => setPromoteEvidenceType(e.target.value)}
+                  >
+                    <option value="ip">IP Address</option>
+                    <option value="domain">Domain Name</option>
+                    <option value="url">URL</option>
+                    <option value="hash_sha256">SHA-256 Hash</option>
+                    <option value="hash_md5">MD5 Hash</option>
+                    <option value="file_path">File Path</option>
+                    <option value="user_account">User Account</option>
+                    <option value="host">Host / Computer</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="p-verdict">Analyst Verdict</label>
+                  <select
+                    id="p-verdict"
+                    value={promoteVerdict}
+                    onChange={(e) =>
+                      setPromoteVerdict(
+                        e.target.value as 'malicious' | 'suspicious' | 'benign' | 'informational',
+                      )
+                    }
+                  >
+                    <option value="malicious">Malicious (Confirmed threat)</option>
+                    <option value="suspicious">Suspicious (Requires validation)</option>
+                    <option value="benign">Benign (Legitimate)</option>
+                    <option value="informational">Informational (Telemetry)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="p-case">Target Incident Case</label>
+                {recentCases.length > 0 ? (
+                  <select
+                    id="p-case"
+                    value={promoteCaseId}
+                    onChange={(e) => setPromoteCaseId(e.target.value)}
+                  >
+                    {recentCases.map((rc) => (
+                      <option key={rc.id} value={rc.id}>
+                        #{rc.id} - {rc.title} ({rc.status})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    id="p-case"
+                    type="number"
+                    required
+                    placeholder="Enter Case ID (e.g. 1)"
+                    value={promoteCaseId}
+                    onChange={(e) => setPromoteCaseId(e.target.value)}
+                  />
+                )}
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="p-notes">Evidence Context / Notes</label>
+                <textarea
+                  id="p-notes"
+                  rows={2}
+                  value={promoteNotes}
+                  onChange={(e) => setPromoteNotes(e.target.value)}
+                />
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setPromotingIoc(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={promoting || !promoteCaseId}
+                >
+                  {promoting ? 'Promoting…' : 'Promote to Evidence'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
