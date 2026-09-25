@@ -69,12 +69,10 @@ def wazuh_alert_to_dict(alert: WazuhAlert) -> dict[str, Any]:
         "rule_id":          alert.rule_id or "unknown",
         "rule_level":       alert.rule_level,
         "description":      alert.rule_description,
-        # Not projected from the Wazuh indexer in the current _ALERT_SOURCE_FIELDS.
-        # Stored as NULL. Extend _ALERT_SOURCE_FIELDS + this mapper to populate them.
-        "src_ip":           None,
-        "dst_ip":           None,
-        "src_port":         None,
-        "dst_port":         None,
+        "src_ip":           getattr(alert, "src_ip", None),
+        "dst_ip":           getattr(alert, "dst_ip", None),
+        "src_port":         getattr(alert, "src_port", None),
+        "dst_port":         getattr(alert, "dst_port", None),
         "location":         alert.location,
         "decoder":          alert.decoder,
         "mitre_tactics":    alert.mitre_tactics,

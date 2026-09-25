@@ -1,9 +1,17 @@
+"""
+backend/app/wazuh/schemas.py
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Pydantic schemas and pure normalization helpers for Wazuh SIEM alerts and events.
+"""
+
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
 class WazuhAlert(BaseModel):
+    """Normalized internal representation of a Wazuh security alert."""
+
     id: str
     timestamp: str | None = None
     agent_id: str | None = None
@@ -16,15 +24,39 @@ class WazuhAlert(BaseModel):
     mitre_techniques: list[str] = Field(default_factory=list)
     decoder: str | None = None
     location: str | None = None
+    src_ip: str | None = None
+    dst_ip: str | None = None
+    src_port: int | None = None
+    dst_port: int | None = None
 
 
 class WazuhAlertsResponse(BaseModel):
+    """Envelope for Wazuh Indexer search query responses."""
+
     status: str = "ok"
     source: str = "wazuh-indexer"
     index: str = "wazuh-alerts-4.x-*"
     total: int = 0
     count: int = 0
     alerts: list[WazuhAlert] = Field(default_factory=list)
+
+
+class WazuhIngestError(BaseModel):
+    """Per-event error reported when normalizing or persisting an alert."""
+
+    event_id: str | None = None
+    error: str
+
+
+class WazuhIngestSummary(BaseModel):
+    """Summary envelope returned by the alert ingestion boundary."""
+
+    status: str = "ok"
+    received: int = 0
+    ingested: int = 0
+    duplicates: int = 0
+    errors: int = 0
+    error_details: list[WazuhIngestError] = Field(default_factory=list)
 
 
 def _as_str(value: Any) -> str | None:
@@ -75,9 +107,10 @@ def _nested(source: dict[str, Any], *keys: str) -> Any:
 
 
 def normalize_alert(hit: dict[str, Any]) -> WazuhAlert:
+    """Normalize an OpenSearch/Elasticsearch hit or direct Wazuh source dict into a WazuhAlert."""
     source = hit.get("_source")
     if not isinstance(source, dict):
-        source = {}
+        source = hit
 
     decoder = source.get("decoder")
     decoder_name = None
@@ -87,6 +120,12 @@ def normalize_alert(hit: dict[str, Any]) -> WazuhAlert:
         decoder_name = _as_str(decoder)
 
     alert_id = _as_str(hit.get("_id")) or _as_str(source.get("id")) or ""
+
+    data = source.get("data") if isinstance(source.get("data"), dict) else {}
+    src_ip = _as_str(data.get("srcip") or data.get("src_ip") or source.get("srcip") or source.get("src_ip"))
+    dst_ip = _as_str(data.get("dstip") or data.get("dst_ip") or source.get("dstip") or source.get("dst_ip"))
+    src_port = _as_int(data.get("srcport") or data.get("src_port") or source.get("srcport") or source.get("src_port"))
+    dst_port = _as_int(data.get("dstport") or data.get("dst_port") or source.get("dstport") or source.get("dst_port"))
 
     return WazuhAlert(
         id=alert_id,
@@ -101,7 +140,27 @@ def normalize_alert(hit: dict[str, Any]) -> WazuhAlert:
         mitre_techniques=_as_str_list(_nested(source, "rule", "mitre", "technique")),
         decoder=decoder_name,
         location=_as_str(source.get("location")),
+        src_ip=src_ip,
+        dst_ip=dst_ip,
+        src_port=src_port,
+        dst_port=dst_port,
     )
+
+
+def normalize_raw_event(event: dict[str, Any]) -> WazuhAlert:
+    """Normalize any arbitrary event payload (Elasticsearch hit, webhook wrapper, or flat JSON)."""
+    if not isinstance(event, dict):
+        raise ValueError("Event must be a JSON object")
+
+    # If wrapped in Wazuh integrator format: {"alert": {...}}
+    if "alert" in event and isinstance(event["alert"], dict):
+        target = event["alert"]
+    elif "_source" in event and isinstance(event["_source"], dict):
+        target = event
+    else:
+        target = event
+
+    return normalize_alert(target)
 
 
 def parse_total(total: Any) -> int:

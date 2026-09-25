@@ -1,8 +1,15 @@
+"""
+backend/app/wazuh/client.py
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Low-level HTTP transport client for Wazuh Manager API and Wazuh Indexer.
+"""
+
 import logging
-import os
+from typing import Any
 
 import httpx
 
+from app.wazuh.config import WazuhSettings, get_wazuh_settings
 from app.wazuh.schemas import WazuhAlertsResponse, normalize_alert, parse_total
 
 logger = logging.getLogger(__name__)
@@ -14,76 +21,109 @@ _ALERT_SOURCE_FIELDS = [
     "rule",
     "decoder",
     "location",
+    "data",
 ]
 
 
+class WazuhClientError(Exception):
+    """Base exception for all Wazuh communication failures."""
+
+
+class WazuhConnectionError(WazuhClientError):
+    """Raised when Wazuh Manager API or Indexer is unreachable or times out."""
+
+
+class WazuhAuthError(WazuhClientError):
+    """Raised when authentication against Wazuh Manager API fails."""
+
+
+class WazuhIndexerError(WazuhClientError):
+    """Raised when querying Wazuh Indexer OpenSearch indices fails."""
+
+
 class WazuhClient:
-    def __init__(self) -> None:
-        self.base_url = os.getenv(
-            "WAZUH_API_URL",
-            "https://host.docker.internal:55000",
-        ).rstrip("/")
+    """HTTP client communicating with Wazuh Manager API (port 55000) and Indexer (port 9200)."""
 
-        self.username = os.getenv("WAZUH_API_USER", "wazuh-wui")
-        self.password = os.getenv("WAZUH_API_PASSWORD", "")
+    def __init__(self, settings: WazuhSettings | None = None) -> None:
+        self.settings = settings or get_wazuh_settings()
 
-        self.indexer_url = os.getenv(
-            "WAZUH_INDEXER_URL",
-            "https://wazuh.indexer:9200",
-        ).rstrip("/")
+    @property
+    def base_url(self) -> str:
+        return self.settings.api_url
 
-        self.indexer_username = os.getenv(
-            "WAZUH_INDEXER_USERNAME",
-            "admin",
-        )
+    @property
+    def username(self) -> str:
+        return self.settings.api_user
 
-        self.indexer_password = os.getenv(
-            "WAZUH_INDEXER_PASSWORD",
-            "",
-        )
+    @property
+    def password(self) -> str:
+        return self.settings.api_password
+
+    @property
+    def indexer_url(self) -> str:
+        return self.settings.indexer_url
+
+    @property
+    def indexer_username(self) -> str:
+        return self.settings.indexer_username
+
+    @property
+    def indexer_password(self) -> str:
+        return self.settings.indexer_password
 
     def _redact(self, message: str) -> str:
-        redacted = message
-        for secret in (self.password, self.indexer_password):
-            if secret:
-                redacted = redacted.replace(secret, "***")
-        return redacted
+        return self.settings.redact(message)
 
     def _authenticate(self) -> str:
-        response = httpx.get(
-            f"{self.base_url}/security/user/authenticate",
-            auth=(self.username, self.password),
-            verify=False,
-            timeout=10.0,
-        )
+        url = f"{self.base_url}/security/user/authenticate"
+        try:
+            response = httpx.get(
+                url,
+                auth=(self.username, self.password),
+                verify=self.settings.verify_ssl,
+                timeout=self.settings.timeout,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["data"]["token"]
+        except httpx.HTTPStatusError as exc:
+            msg = self._redact(f"Wazuh auth HTTP error ({exc.response.status_code}): {exc}")
+            logger.error(msg)
+            raise WazuhAuthError(msg) from exc
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.RequestError) as exc:
+            msg = self._redact(f"Wazuh auth connection failure ({type(exc).__name__}): {exc}")
+            logger.error(msg)
+            raise WazuhConnectionError(msg) from exc
 
-        response.raise_for_status()
-
-        data = response.json()
-        return data["data"]["token"]
-
-    def _request(self, method: str, path: str, **kwargs):
+    def _request(self, method: str, path: str, **kwargs) -> Any:
         token = self._authenticate()
-
         headers = kwargs.pop("headers", {})
         headers["Authorization"] = f"Bearer {token}"
 
-        response = httpx.request(
-            method,
-            f"{self.base_url}{path}",
-            headers=headers,
-            verify=False,
-            timeout=10.0,
-            **kwargs,
-        )
-
-        response.raise_for_status()
-
-        return response.json()
+        url = f"{self.base_url}{path}"
+        try:
+            response = httpx.request(
+                method,
+                url,
+                headers=headers,
+                verify=self.settings.verify_ssl,
+                timeout=self.settings.timeout,
+                **kwargs,
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as exc:
+            msg = self._redact(f"Wazuh API request failed ({exc.response.status_code}): {exc}")
+            logger.error(msg)
+            raise WazuhClientError(msg) from exc
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.RequestError) as exc:
+            msg = self._redact(f"Wazuh API connection failure ({type(exc).__name__}): {exc}")
+            logger.error(msg)
+            raise WazuhConnectionError(msg) from exc
 
     def health(self) -> dict:
+        """Verify API authentication reachability against Wazuh Manager."""
         self._authenticate()
-
         return {
             "status": "ok",
             "service": "wazuh-api",
@@ -91,32 +131,43 @@ class WazuhClient:
         }
 
     def get_agents(self) -> dict:
+        """Retrieve registered Wazuh agents list."""
         return self._request("GET", "/agents")
 
     def get_alerts(self, limit: int = 20) -> WazuhAlertsResponse:
+        """Query latest security alerts from Wazuh Indexer via OpenSearch _search."""
         query = {
             "size": limit,
             "_source": _ALERT_SOURCE_FIELDS,
             "sort": [{"timestamp": {"order": "desc"}}],
         }
 
+        url = f"{self.indexer_url}/wazuh-alerts-4.x-*/_search"
         try:
             response = httpx.post(
-                f"{self.indexer_url}/wazuh-alerts-4.x-*/_search",
+                url,
                 auth=(self.indexer_username, self.indexer_password),
                 json=query,
-                verify=False,
-                timeout=10.0,
+                verify=self.settings.verify_ssl,
+                timeout=self.settings.timeout,
             )
             response.raise_for_status()
-        except Exception as exc:
-            logger.error(
-                "Wazuh indexer alert search failed (%s): %s indexer=%s index=wazuh-alerts-4.x-*",
-                type(exc).__name__,
-                self._redact(str(exc)),
-                self.indexer_url,
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.RequestError) as exc:
+            msg = self._redact(
+                f"Wazuh indexer connection failed ({type(exc).__name__}): {exc} url={url}"
             )
-            raise
+            logger.error(msg)
+            raise WazuhIndexerError(msg) from exc
+        except httpx.HTTPStatusError as exc:
+            msg = self._redact(
+                f"Wazuh indexer returned HTTP {exc.response.status_code}: url={url}"
+            )
+            logger.error(msg)
+            raise WazuhIndexerError(msg) from exc
+        except Exception as exc:
+            msg = self._redact(f"Wazuh indexer alert search failed ({type(exc).__name__}): {exc}")
+            logger.error(msg)
+            raise WazuhIndexerError(msg) from exc
 
         data = response.json()
         hits = data.get("hits", {}).get("hits", [])
