@@ -618,3 +618,103 @@ export async function fetchAlertEnrichment(
 }
 
 export const getAlertEnrichment = fetchAlertEnrichment
+
+// ── Dashboard Analytics types ────────────────────────────────────────────────
+
+export type TimeSeriesBucket = {
+  timestamp: string
+  label: string
+  count: number
+}
+
+export type DaySeriesBucket = {
+  date: string
+  label: string
+  count: number
+}
+
+export type MITRETechniqueSummary = {
+  technique_id: string
+  count: number
+}
+
+export type MITRETacticSummary = {
+  tactic: string
+  count: number
+}
+
+export type MITREAnalytics = {
+  top_techniques: MITRETechniqueSummary[]
+  top_tactics: MITRETacticSummary[]
+}
+
+export type IOCSummary = {
+  source: string
+  analyzed_alert_count: number
+  total_indicators: number
+  by_type: Record<string, number>
+  samples: Record<string, string[]>
+}
+
+export type RecentAlertSummary = {
+  id: number
+  wazuh_alert_id: string
+  timestamp: string
+  agent_id: string | null
+  agent_name: string | null
+  rule_id: string
+  rule_level: number | null
+  description: string | null
+  mitre_tactics: string[]
+  mitre_techniques: string[]
+}
+
+export type RecentCaseSummary = {
+  id: number
+  title: string
+  status: string
+  severity: string
+  alert_count: number
+  created_at: string
+}
+
+export type RecentActivitySummary = {
+  id: number
+  case_id: number
+  case_title: string
+  author_username: string
+  content: string
+  created_at: string
+}
+
+export type AlertMetrics = {
+  total: number
+  last_24h: number
+  last_7d: number
+  by_severity: Record<string, number>
+  by_status: Record<string, number>
+}
+
+export type CaseMetrics = {
+  total: number
+  open: number
+  by_severity: Record<string, number>
+  by_status: Record<string, number>
+}
+
+export type DashboardSummary = {
+  generated_at: string
+  alerts: AlertMetrics
+  cases: CaseMetrics
+  time_series_24h: TimeSeriesBucket[]
+  time_series_7d: DaySeriesBucket[]
+  mitre: MITREAnalytics
+  iocs: IOCSummary
+  recent_alerts: RecentAlertSummary[]
+  recent_cases: RecentCaseSummary[]
+  recent_activity: RecentActivitySummary[]
+}
+
+export async function fetchDashboardSummary(): Promise<DashboardSummary> {
+  return apiFetch<DashboardSummary>('/api/v1/dashboard/summary')
+}

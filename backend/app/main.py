@@ -5,6 +5,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from app.api.alerts import router as alerts_router
 from app.api.auth import router as auth_router
 from app.api.cases import router as cases_router
+from app.api.dashboard import router as dashboard_router
 from app.api.deps import get_current_active_user
 from app.api.enrichment import router as enrichment_router
 from app.db import check_database
@@ -57,4 +58,5 @@ app.include_router(auth_router)
 app.include_router(alerts_router, dependencies=[Depends(get_current_active_user)])
 app.include_router(enrichment_router, dependencies=[Depends(get_current_active_user)])
 app.include_router(cases_router, dependencies=[Depends(get_current_active_user)])
+app.include_router(dashboard_router, dependencies=[Depends(get_current_active_user)])
 app.include_router(wazuh_router, dependencies=[Depends(get_current_active_user)])
