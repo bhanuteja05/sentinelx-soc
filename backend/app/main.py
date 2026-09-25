@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 
 from app.api.alerts import router as alerts_router
+from app.api.cases import router as cases_router
 from app.db import check_database
 from app.wazuh.routes import router as wazuh_router
 
@@ -35,4 +36,5 @@ def api_v1_health_db() -> dict[str, str]:
 
 
 app.include_router(alerts_router)
+app.include_router(cases_router)
 app.include_router(wazuh_router)
