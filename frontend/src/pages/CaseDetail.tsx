@@ -12,6 +12,7 @@ import {
 import { SeverityBadge, SeverityLabel } from '../components/SeverityBadge'
 import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
+import { useAuth } from '../context/AuthContext'
 
 function formatTs(value: string | null | undefined): string {
   if (!value) return '—'
@@ -20,6 +21,7 @@ function formatTs(value: string | null | undefined): string {
 }
 
 export default function CaseDetail() {
+  const { user } = useAuth()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [c, setCase] = useState<CaseDetailOut | null>(null)
@@ -175,9 +177,11 @@ export default function CaseDetail() {
           >
             {isEditing ? 'Cancel Edit' : 'Edit Case'}
           </button>
-          <button className="btn btn-danger" onClick={handleDeleteCase}>
-            Delete Case
-          </button>
+          {user?.role === 'admin' && (
+            <button className="btn btn-danger" onClick={handleDeleteCase}>
+              Delete Case
+            </button>
+          )}
         </div>
       </div>
 

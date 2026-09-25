@@ -193,6 +193,28 @@ export class NotFoundError extends Error {
   }
 }
 
+// ── Auth types ───────────────────────────────────────────────────────────────
+
+export type AuthUser = {
+  id: number
+  username: string
+  email: string
+  role: 'analyst' | 'admin'
+  is_active: boolean
+  created_at: string
+}
+
+export type LoginCredentials = {
+  username: string
+  password: string
+}
+
+export type LoginResponse = {
+  access_token: string
+  token_type: string
+  user: AuthUser
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -202,19 +224,56 @@ export class ApiError extends Error {
   }
 }
 
+const TOKEN_STORAGE_KEY = 'sentinelx_token'
+
+export function getStoredToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setStoredToken(token: string): void {
+  try {
+    localStorage.setItem(TOKEN_STORAGE_KEY, token)
+  } catch {
+    // ignore storage quota errors in edge environments
+  }
+}
+
+export function removeStoredToken(): void {
+  try {
+    localStorage.removeItem(TOKEN_STORAGE_KEY)
+  } catch {
+    // ignore
+  }
+}
+
 const DATABASE_HEALTH_PATH = '/api/v1/health/db'
 const WAZUH_HEALTH_PATH = '/api/v1/wazuh/health'
 const WAZUH_AGENTS_PATH = '/api/v1/wazuh/agents'
 
 async function requestJson<T>(path: string, unavailable: Error): Promise<T> {
   let response: Response
+  const token = getStoredToken()
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
 
   try {
-    response = await fetch(path, {
-      headers: { Accept: 'application/json' },
-    })
+    response = await fetch(path, { headers })
   } catch {
     throw new BackendUnavailableError()
+  }
+
+  if (response.status === 401) {
+    removeStoredToken()
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'))
+    }
+    throw new ApiError(401, 'Unauthorized')
   }
 
   if (!response.ok) {
@@ -230,25 +289,91 @@ async function apiFetch<T>(
   init?: RequestInit,
 ): Promise<T> {
   let response: Response
+  const token = getStoredToken()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(init?.headers as Record<string, string> | undefined),
+  }
+
   try {
     response = await fetch(path, {
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       ...init,
+      headers,
     })
   } catch {
     throw new BackendUnavailableError()
   }
 
+  if (response.status === 401) {
+    removeStoredToken()
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'))
+    }
+    const text = await response.text().catch(() => 'Unauthorized')
+    throw new ApiError(401, text || 'Unauthorized')
+  }
+
   if (response.status === 404) throw new NotFoundError()
   if (!response.ok) {
-    const text = await response.text().catch(() => response.statusText)
-    throw new ApiError(response.status, text)
+    let text = ''
+    try {
+      const err = await response.json()
+      if (err.detail) {
+        text = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail)
+      }
+    } catch {
+      text = await response.text().catch(() => response.statusText)
+    }
+    throw new ApiError(response.status, text || response.statusText)
   }
 
   // 204 No Content
   if (response.status === 204) return undefined as T
 
   return (await response.json()) as T
+}
+
+// ── Auth API calls ────────────────────────────────────────────────────────────
+
+export async function login(credentials: LoginCredentials): Promise<LoginResponse> {
+  const response = await fetch('/api/v1/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      username_or_email: credentials.username,
+      username: credentials.username,
+      password: credentials.password,
+    }),
+  })
+
+  if (!response.ok) {
+    let msg = response.statusText
+    try {
+      const err = await response.json()
+      if (err.detail) {
+        msg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail)
+      }
+    } catch {
+      // ignore
+    }
+    throw new ApiError(response.status, msg)
+  }
+
+  return (await response.json()) as LoginResponse
+}
+
+export async function fetchMe(): Promise<AuthUser> {
+  return apiFetch<AuthUser>('/api/v1/auth/me')
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await apiFetch<void>('/api/v1/auth/logout', { method: 'POST' })
+  } finally {
+    removeStoredToken()
+  }
 }
 
 export async function fetchDatabaseHealth(): Promise<DatabaseHealthResponse> {

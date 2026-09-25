@@ -21,7 +21,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.alerts import AlertOut, PaginatedAlertsResponse, _alert_to_out
+from app.api.deps import require_role
 from app.db import get_db
+
 from app.repositories.case import SORTABLE_CASE_FIELDS, count_case_alerts
 from app.services.case import (
     VALID_SEVERITIES,
@@ -327,11 +329,13 @@ def update_case_endpoint(
 def delete_case_endpoint(
     case_id: int,
     db: Session = Depends(get_db),
+    _admin: Any = Depends(require_role("admin")),
 ) -> None:
-    """Delete a Case. Preserves all associated Alert telemetry."""
+    """Delete a Case. Preserves all associated Alert telemetry (admin only)."""
     deleted = service_delete_case(db, case_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Case {case_id} not found.")
+
 
 
 @router.get("/{case_id}", response_model=CaseDetailOut)

@@ -1,7 +1,9 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 
 from app.api.alerts import router as alerts_router
+from app.api.auth import router as auth_router
 from app.api.cases import router as cases_router
+from app.api.deps import get_current_active_user
 from app.db import check_database
 from app.wazuh.routes import router as wazuh_router
 
@@ -35,6 +37,7 @@ def api_v1_health_db() -> dict[str, str]:
     return {"status": "ok", "database": "reachable"}
 
 
-app.include_router(alerts_router)
-app.include_router(cases_router)
-app.include_router(wazuh_router)
+app.include_router(auth_router)
+app.include_router(alerts_router, dependencies=[Depends(get_current_active_user)])
+app.include_router(cases_router, dependencies=[Depends(get_current_active_user)])
+app.include_router(wazuh_router, dependencies=[Depends(get_current_active_user)])

@@ -15,19 +15,16 @@ def engine():
 @pytest.fixture
 def db_session(engine) -> Generator[Session, None, None]:
     connection = engine.connect()
-    transaction = connection.begin()
     session = Session(bind=connection)
 
     yield session
 
     session.close()
-    if transaction.is_active:
-        transaction.rollback()
     connection.close()
 
 
 @pytest.fixture
 def clean_db(db_session: Session) -> Session:
-    db_session.execute(text("TRUNCATE TABLE alerts, cases, case_alerts RESTART IDENTITY CASCADE"))
+    db_session.execute(text("TRUNCATE TABLE users, alerts, cases, case_alerts RESTART IDENTITY CASCADE"))
     db_session.commit()
     return db_session

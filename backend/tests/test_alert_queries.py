@@ -18,20 +18,32 @@ from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 import pytest
 
+from app.api.deps import get_current_active_user
 from app.db import get_db
 from app.main import app
+from app.models.user import User
 from app.repositories.alert import create_alert
 
 
 @pytest.fixture
 def client(clean_db):
-    """TestClient with get_db overridden to use clean test database session."""
+    """TestClient with get_db and get_current_active_user overridden to use clean test database session."""
     def override_get_db():
         yield clean_db
 
+    mock_admin = User(
+        id=1,
+        username="testadmin",
+        email="testadmin@sentinelx.local",
+        password_hash="dummy",
+        role="admin",
+        is_active=True,
+    )
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_active_user] = lambda: mock_admin
     yield TestClient(app)
     app.dependency_overrides.clear()
+
 
 
 def _seed_alert(db, **overrides):

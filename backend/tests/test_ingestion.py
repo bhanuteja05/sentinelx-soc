@@ -183,16 +183,28 @@ _MOCK_RESPONSE = WazuhAlertsResponse(
 
 @pytest.fixture
 def client(clean_db):
-    """TestClient with get_db overridden to use the clean test session."""
+    """TestClient with get_db and get_current_active_user overridden to use the clean test session."""
+    from app.api.deps import get_current_active_user
     from app.db import get_db
     from app.main import app
+    from app.models.user import User
 
     def override_get_db():
         yield clean_db
 
+    mock_admin = User(
+        id=1,
+        username="testadmin",
+        email="testadmin@sentinelx.local",
+        password_hash="dummy",
+        role="admin",
+        is_active=True,
+    )
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_active_user] = lambda: mock_admin
     yield TestClient(app)
     app.dependency_overrides.clear()
+
 
 
 @patch("app.api.alerts.wazuh_client")

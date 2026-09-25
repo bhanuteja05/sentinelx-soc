@@ -17,6 +17,7 @@ def test_alembic_migration_lifecycle():
     tables = inspector.get_table_names()
     assert "alerts" not in tables
     assert "cases" not in tables
+    assert "users" not in tables
 
     # 2. Upgrade to head
     command.upgrade(alembic_cfg, "head")
@@ -24,4 +25,5 @@ def test_alembic_migration_lifecycle():
     tables = inspector.get_table_names()
     assert "alerts" in tables
     assert "cases" in tables
+    assert "users" in tables
     assert "alembic_version" in tables
