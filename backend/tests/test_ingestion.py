@@ -289,7 +289,9 @@ def test_get_alerts_after_ingest(mock_client, client, clean_db):
 
     resp = client.get("/api/v1/alerts")
     assert resp.status_code == 200
-    alerts = resp.json()
+    data = resp.json()
+    alerts = data["items"]
+    assert data["total"] == 1
     assert len(alerts) == 1
     assert alerts[0]["wazuh_alert_id"] == "integration-test-alert-001"
     assert alerts[0]["src_ip"] is None
@@ -313,7 +315,7 @@ def test_get_alert_by_id(mock_client, client, clean_db):
     client.post("/api/v1/alerts/ingest?limit=1")
 
     list_resp = client.get("/api/v1/alerts")
-    alert_id = list_resp.json()[0]["id"]
+    alert_id = list_resp.json()["items"][0]["id"]
 
     by_id_resp = client.get(f"/api/v1/alerts/{alert_id}")
     assert by_id_resp.status_code == 200

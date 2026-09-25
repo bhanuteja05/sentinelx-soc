@@ -1,3 +1,5 @@
+from datetime import datetime
+import math
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
@@ -10,6 +12,7 @@ from app.repositories.alert import (
     get_alert_by_id,
     get_alert_by_wazuh_id,
     list_alerts,
+    search_alerts,
 )
 
 
@@ -69,3 +72,50 @@ def get_recent_alerts(
 
 def get_alert_count(db: Session) -> int:
     return count_alerts(db)
+
+
+def search_alerts_service(
+    db: Session,
+    page: int = 1,
+    page_size: int = 25,
+    sort_by: str = "timestamp",
+    sort_order: str = "desc",
+    rule_level: int | None = None,
+    min_rule_level: int | None = None,
+    max_rule_level: int | None = None,
+    agent_id: str | None = None,
+    agent_name: str | None = None,
+    rule_id: str | None = None,
+    mitre_tactic: str | None = None,
+    mitre_technique: str | None = None,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+) -> dict[str, Any]:
+    """Service to search alerts and compute pagination metadata."""
+    items, total = search_alerts(
+        db=db,
+        page=page,
+        page_size=page_size,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        rule_level=rule_level,
+        min_rule_level=min_rule_level,
+        max_rule_level=max_rule_level,
+        agent_id=agent_id,
+        agent_name=agent_name,
+        rule_id=rule_id,
+        mitre_tactic=mitre_tactic,
+        mitre_technique=mitre_technique,
+        start_time=start_time,
+        end_time=end_time,
+    )
+
+    pages = math.ceil(total / page_size) if total > 0 else 0
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": pages,
+    }

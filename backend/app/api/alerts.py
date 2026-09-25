@@ -9,12 +9,19 @@ POST /api/v1/alerts/ingest
     service.  One malformed or error alert does not abort the batch.
 
 GET  /api/v1/alerts
-    Query persisted alerts from PostgreSQL with optional filters.
+    Query paginated persisted alerts from PostgreSQL with filtering and sorting.
 
 GET  /api/v1/alerts/count
     Return the total number of persisted alerts.
+
+GET  /api/v1/alerts/wazuh/{wazuh_alert_id}
+    Retrieve full investigation details of an alert by Wazuh alert ID.
+
+GET  /api/v1/alerts/{alert_id}
+    Retrieve full investigation details of an alert by database ID.
 """
 
+from datetime import datetime
 import logging
 from typing import Any
 
@@ -25,9 +32,10 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.services.alert import (
     get_alert,
+    get_alert_by_external_id,
     get_alert_count,
-    get_recent_alerts,
     ingest_alert,
+    search_alerts_service,
 )
 from app.wazuh.client import wazuh_client
 from app.wazuh.ingestion import AlertMappingError, wazuh_alert_to_dict
@@ -38,6 +46,14 @@ router = APIRouter(
     prefix="/api/v1/alerts",
     tags=["Alerts"],
 )
+
+# ---------------------------------------------------------------------------
+# Constants & Allowlist
+# ---------------------------------------------------------------------------
+
+_MAX_INGEST_LIMIT = 500
+_DEFAULT_INGEST_LIMIT = 100
+ALLOWED_SORT_FIELDS: set[str] = {"timestamp", "rule_level", "id", "rule_id", "created_at"}
 
 # ---------------------------------------------------------------------------
 # Response schemas
@@ -63,7 +79,7 @@ class IngestResponse(BaseModel):
 
 
 class AlertOut(BaseModel):
-    """Persisted alert representation returned by GET endpoints."""
+    """Persisted alert summary returned by list endpoints (excludes raw_alert)."""
 
     id: int
     wazuh_alert_id: str
@@ -85,6 +101,23 @@ class AlertOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AlertDetailOut(AlertOut):
+    """Full forensic alert representation returned by single-alert endpoints."""
+
+    created_at: str
+    raw_alert: dict[str, Any]
+
+
+class PaginatedAlertsResponse(BaseModel):
+    """Paginated envelope for alert list queries."""
+
+    items: list[AlertOut]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+
+
 class AlertCountResponse(BaseModel):
     count: int
 
@@ -92,9 +125,6 @@ class AlertCountResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-_MAX_INGEST_LIMIT = 500
-_DEFAULT_INGEST_LIMIT = 100
 
 
 def _safe_alert_id(raw_id: Any) -> str | None:
@@ -127,6 +157,30 @@ def _alert_to_out(alert) -> AlertOut:
     )
 
 
+def _alert_to_detail_out(alert) -> AlertDetailOut:
+    """Convert an Alert ORM object to the AlertDetailOut schema with full raw_alert."""
+    return AlertDetailOut(
+        id=alert.id,
+        wazuh_alert_id=alert.wazuh_alert_id,
+        timestamp=alert.timestamp.isoformat(),
+        created_at=alert.created_at.isoformat(),
+        agent_id=alert.agent_id,
+        agent_name=alert.agent_name,
+        rule_id=alert.rule_id,
+        rule_level=alert.rule_level,
+        description=alert.description,
+        src_ip=alert.src_ip,
+        dst_ip=alert.dst_ip,
+        src_port=alert.src_port,
+        dst_port=alert.dst_port,
+        location=alert.location,
+        decoder=alert.decoder,
+        mitre_tactics=alert.mitre_tactics or [],
+        mitre_techniques=alert.mitre_techniques or [],
+        raw_alert=alert.raw_alert or {},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -151,7 +205,6 @@ def ingest_alerts(
     Secrets (Wazuh credentials, DB connection strings) are never included
     in error detail fields.
     """
-    # 1. Fetch from Wazuh Indexer
     try:
         response = wazuh_client.get_alerts(limit=limit)
     except Exception as exc:
@@ -173,7 +226,6 @@ def ingest_alerts(
     errors = 0
     error_details: list[AlertError] = []
 
-    # 2. Normalize and persist each alert individually
     for wazuh_alert in wazuh_alerts:
         raw_id = _safe_alert_id(wazuh_alert.id)
         try:
@@ -202,7 +254,6 @@ def ingest_alerts(
             error_details.append(
                 AlertError(
                     wazuh_alert_id=raw_id,
-                    # Deliberately terse — no DB URL, no credentials
                     error=f"Persistence error: {type(exc).__name__}",
                 )
             )
@@ -239,31 +290,108 @@ def alert_count(db: Session = Depends(get_db)) -> AlertCountResponse:
     return AlertCountResponse(count=get_alert_count(db))
 
 
-@router.get("", response_model=list[AlertOut])
+@router.get("", response_model=PaginatedAlertsResponse)
 def list_alerts(
-    skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=500),
-    rule_id: str | None = Query(default=None),
-    min_level: int | None = Query(default=None, ge=0),
-    agent_id: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(default=25, ge=1, le=100, description="Items per page"),
+    sort_by: str = Query(default="timestamp", description="Sort field allowlist"),
+    sort_order: str = Query(default="desc", pattern="^(?i)(asc|desc)$", description="Sort direction"),
+    rule_level: int | None = Query(default=None, ge=0, le=16, description="Exact rule level"),
+    min_rule_level: int | None = Query(default=None, ge=0, le=16, description="Minimum rule level"),
+    max_rule_level: int | None = Query(default=None, ge=0, le=16, description="Maximum rule level"),
+    agent_id: str | None = Query(default=None, max_length=64, description="Agent ID"),
+    agent_name: str | None = Query(default=None, max_length=128, description="Agent name"),
+    rule_id: str | None = Query(default=None, max_length=64, description="Rule ID"),
+    mitre_tactic: str | None = Query(default=None, max_length=128, description="MITRE tactic"),
+    mitre_technique: str | None = Query(default=None, max_length=128, description="MITRE technique"),
+    start_time: datetime | None = Query(default=None, description="Start timestamp (ISO 8601)"),
+    end_time: datetime | None = Query(default=None, description="End timestamp (ISO 8601)"),
     db: Session = Depends(get_db),
-) -> list[AlertOut]:
-    """Return recently persisted alerts from PostgreSQL, ordered by timestamp descending."""
-    alerts = get_recent_alerts(
-        db=db,
-        skip=skip,
-        limit=limit,
-        rule_id=rule_id,
-        min_level=min_level,
-        agent_id=agent_id,
+) -> PaginatedAlertsResponse:
+    """Query paginated persisted alerts with multi-field filtering and sorting."""
+    # 1. Sort allowlist validation
+    if sort_by.lower() not in ALLOWED_SORT_FIELDS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid sort_by field '{sort_by}'. Allowed fields: {sorted(ALLOWED_SORT_FIELDS)}",
+        )
+
+    # 2. Cross-field validations
+    if start_time and end_time and start_time > end_time:
+        raise HTTPException(
+            status_code=400,
+            detail="start_time must be before or equal to end_time",
+        )
+
+    if rule_level is not None and (min_rule_level is not None or max_rule_level is not None):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot combine rule_level with min_rule_level or max_rule_level",
+        )
+
+    if min_rule_level is not None and max_rule_level is not None and min_rule_level > max_rule_level:
+        raise HTTPException(
+            status_code=400,
+            detail="min_rule_level cannot be greater than max_rule_level",
+        )
+
+    # 3. Service call
+    try:
+        result = search_alerts_service(
+            db=db,
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by.lower(),
+            sort_order=sort_order.lower(),
+            rule_level=rule_level,
+            min_rule_level=min_rule_level,
+            max_rule_level=max_rule_level,
+            agent_id=agent_id,
+            agent_name=agent_name,
+            rule_id=rule_id,
+            mitre_tactic=mitre_tactic,
+            mitre_technique=mitre_technique,
+            start_time=start_time,
+            end_time=end_time,
+        )
+    except Exception as exc:
+        logger.error("Alert search query failed (%s): %s", type(exc).__name__, str(exc)[:200])
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to query alerts from database",
+        ) from None
+
+    return PaginatedAlertsResponse(
+        items=[_alert_to_out(a) for a in result["items"]],
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+        pages=result["pages"],
     )
-    return [_alert_to_out(a) for a in alerts]
 
 
-@router.get("/{alert_id}", response_model=AlertOut)
-def get_alert_by_id(alert_id: int, db: Session = Depends(get_db)) -> AlertOut:
+@router.get("/wazuh/{wazuh_alert_id}", response_model=AlertDetailOut)
+def get_alert_by_wazuh_id_endpoint(
+    wazuh_alert_id: str,
+    db: Session = Depends(get_db),
+) -> AlertDetailOut:
+    """Return a single persisted alert by its external Wazuh alert ID."""
+    alert = get_alert_by_external_id(db, wazuh_alert_id)
+    if alert is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Alert with Wazuh ID '{wazuh_alert_id}' not found.",
+        )
+    return _alert_to_detail_out(alert)
+
+
+@router.get("/{alert_id}", response_model=AlertDetailOut)
+def get_alert_by_id_endpoint(
+    alert_id: int,
+    db: Session = Depends(get_db),
+) -> AlertDetailOut:
     """Return a single persisted alert by its PostgreSQL primary key."""
     alert = get_alert(db, alert_id)
     if alert is None:
         raise HTTPException(status_code=404, detail=f"Alert {alert_id} not found.")
-    return _alert_to_out(alert)
+    return _alert_to_detail_out(alert)
