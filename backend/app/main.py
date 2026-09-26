@@ -26,9 +26,15 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="SentinelX",
-    version="0.1.0",
-    description="SentinelX SOC lab API (application foundation).",
+    title="SentinelX SOC Lab",
+    version="1.0.0",
+    description=(
+        "SentinelX Enterprise SOC Detection & Incident Response Lab API. "
+        "Provides alert ingestion, MITRE ATT&CK enrichment, case management, "
+        "automated triage, analyst ownership queues, evidence locker, incident lifecycle, "
+        "and human-in-the-loop active response containment. "
+        "All endpoints (except /health and /api/v1/auth/login) require JWT Bearer authentication."
+    ),
     lifespan=lifespan,
 )
 
