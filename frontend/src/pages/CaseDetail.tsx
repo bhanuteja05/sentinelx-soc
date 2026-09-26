@@ -12,14 +12,19 @@ import {
   fetchCaseById,
   fetchCaseEvidence,
   fetchCaseNotes,
+  fetchResponseActions,
+  fetchApprovedCommands,
+  executeActiveResponse,
   reopenCase,
   resolveCase,
   updateCase,
   updateCaseEvidence,
   updateCaseNote,
+  type ApprovedCommand,
   type CaseDetailOut,
   type CaseEvidence,
   type CaseNote,
+  type ResponseAction,
   NotFoundError,
 } from '../api/client'
 import { SeverityBadge, SeverityLabel } from '../components/SeverityBadge'
@@ -128,13 +133,29 @@ export default function CaseDetail() {
   const [reopening, setReopening] = useState(false)
   const [reopenError, setReopenError] = useState<string | null>(null)
 
+  // Active Response & Defensive Containment state
+  const [responseActions, setResponseActions] = useState<ResponseAction[]>([])
+  const [loadingResponseActions, setLoadingResponseActions] = useState(true)
+  const [responseActionError, setResponseActionError] = useState<string | null>(null)
+  const [approvedCommands, setApprovedCommands] = useState<ApprovedCommand[]>([])
+  const [showContainmentModal, setShowContainmentModal] = useState(false)
+  const [containmentCommand, setContainmentCommand] = useState<string>('firewall-drop')
+  const [containmentTargetType, setContainmentTargetType] = useState<'ip' | 'agent'>('ip')
+  const [containmentTargetValue, setContainmentTargetValue] = useState<string>('')
+  const [containmentAgentId, setContainmentAgentId] = useState<string>('')
+  const [containmentConfirmed, setContainmentConfirmed] = useState(false)
+  const [executingContainment, setExecutingContainment] = useState(false)
+  const [containmentModalError, setContainmentModalError] = useState<string | null>(null)
+  const [selectedActionDetail, setSelectedActionDetail] = useState<ResponseAction | null>(null)
+
   async function reload() {
     if (!id) return
     try {
-      const [caseData, notesData, evidenceData] = await Promise.all([
+      const [caseData, notesData, evidenceData, actionsData] = await Promise.all([
         fetchCaseById(Number(id)),
         fetchCaseNotes(Number(id)),
         fetchCaseEvidence(Number(id)),
+        fetchResponseActions({ case_id: Number(id) }).catch(() => ({ items: [], total: 0, page: 1, page_size: 25, pages: 1 })),
       ])
       setCase(caseData)
       setEditTitle(caseData.title)
@@ -143,6 +164,7 @@ export default function CaseDetail() {
       setEditSeverity(caseData.severity)
       setNotes(notesData)
       setEvidence(evidenceData)
+      setResponseActions(actionsData.items)
     } catch (e) {
       if (e instanceof NotFoundError) {
         setError(`Case #${id} not found.`)
@@ -159,11 +181,17 @@ export default function CaseDetail() {
       setLoading(true)
       setLoadingNotes(true)
       setLoadingEvidence(true)
+      setLoadingResponseActions(true)
       try {
-        const [caseData, notesData, evidenceData] = await Promise.all([
+        const [caseData, notesData, evidenceData, actionsData, cmdsData] = await Promise.all([
           fetchCaseById(Number(id)),
           fetchCaseNotes(Number(id)),
           fetchCaseEvidence(Number(id)),
+          fetchResponseActions({ case_id: Number(id) }).catch((err) => {
+            setResponseActionError(String(err))
+            return { items: [], total: 0, page: 1, page_size: 25, pages: 1 }
+          }),
+          fetchApprovedCommands().catch(() => []),
         ])
         if (!cancelled) {
           setCase(caseData)
@@ -173,6 +201,8 @@ export default function CaseDetail() {
           setEditSeverity(caseData.severity)
           setNotes(notesData)
           setEvidence(evidenceData)
+          setResponseActions(actionsData.items)
+          setApprovedCommands(cmdsData)
         }
       } catch (e) {
         if (!cancelled) {
@@ -187,6 +217,7 @@ export default function CaseDetail() {
           setLoading(false)
           setLoadingNotes(false)
           setLoadingEvidence(false)
+          setLoadingResponseActions(false)
         }
       }
     }
@@ -513,6 +544,63 @@ export default function CaseDetail() {
       setTimeout(() => setActionMsg(null), 3000)
     } catch (e) {
       setNotesError(String(e))
+    }
+  }
+
+  function handleOpenContainmentModal(defaults?: {
+    command?: string
+    targetType?: 'ip' | 'agent'
+    targetValue?: string
+    agentId?: string
+  }) {
+    const cmd = defaults?.command ?? 'firewall-drop'
+    setContainmentCommand(cmd)
+    const matchingCmd = approvedCommands.find((c) => c.command === cmd)
+    setContainmentTargetType(defaults?.targetType ?? (matchingCmd?.target_type ?? 'ip'))
+    setContainmentTargetValue(defaults?.targetValue ?? '')
+    setContainmentAgentId(defaults?.agentId ?? '')
+    setContainmentConfirmed(false)
+    setContainmentModalError(null)
+    setShowContainmentModal(true)
+  }
+
+  function handleCommandChange(cmd: string) {
+    setContainmentCommand(cmd)
+    const matchingCmd = approvedCommands.find((c) => c.command === cmd)
+    if (matchingCmd) {
+      setContainmentTargetType(matchingCmd.target_type)
+    }
+  }
+
+  async function handleExecuteContainment(e: React.FormEvent) {
+    e.preventDefault()
+    if (!c) return
+    if (!containmentConfirmed) {
+      setContainmentModalError('Please explicitly confirm the containment action before executing.')
+      return
+    }
+    setExecutingContainment(true)
+    setContainmentModalError(null)
+    try {
+      const action = await executeActiveResponse({
+        command: containmentCommand,
+        target_type: containmentTargetType,
+        target_value: containmentTargetValue.trim(),
+        agent_id: containmentTargetType === 'ip' && containmentAgentId.trim() ? containmentAgentId.trim() : undefined,
+        case_id: c.id,
+      })
+      setResponseActions((prev) => [action, ...prev])
+      setShowContainmentModal(false)
+      setActionMsg(`Active response ${action.status}: ${action.command} on ${action.target_value}`)
+      setTimeout(() => setActionMsg(null), 5000)
+
+      // Refresh case notes to reflect audit note
+      const notesRes = await fetchCaseNotes(c.id)
+      setNotes(notesRes)
+    } catch (err) {
+      setContainmentModalError(String(err))
+    } finally {
+      setExecutingContainment(false)
     }
   }
 
@@ -919,6 +1007,26 @@ export default function CaseDetail() {
                     </td>
                     <td>{formatTs(ev.created_at)}</td>
                     <td className="cell-actions">
+                      {ev.evidence_type === 'ip' && (
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-warning"
+                          title="Block IP via Active Response"
+                          onClick={() => handleOpenContainmentModal({ command: 'firewall-drop', targetType: 'ip', targetValue: ev.value })}
+                        >
+                          🛡️ Block IP
+                        </button>
+                      )}
+                      {ev.evidence_type === 'host' && (
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-danger"
+                          title="Isolate Host via Active Response"
+                          onClick={() => handleOpenContainmentModal({ command: 'isolate-host', targetType: 'agent', targetValue: ev.value })}
+                        >
+                          🔒 Isolate Host
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn btn-xs btn-danger"
@@ -926,6 +1034,88 @@ export default function CaseDetail() {
                         onClick={() => void handleDeleteEvidence(ev.id, ev.value)}
                       >
                         Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* Defensive Containment & Active Response */}
+      <section className="dash-section">
+        <div className="section-header">
+          <div>
+            <h2>Defensive Containment & Active Response ({responseActions.length})</h2>
+            <p className="section-subtitle">
+              Auditable execution of verified Wazuh active response commands and host containment actions.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            onClick={() => handleOpenContainmentModal()}
+          >
+            + Execute Response
+          </button>
+        </div>
+
+        {responseActionError && <ErrorBanner message={responseActionError} />}
+
+        {loadingResponseActions ? (
+          <Spinner label="Loading containment actions…" />
+        ) : responseActions.length === 0 ? (
+          <div className="empty-evidence-box">
+            <span className="empty-icon">🛡️</span>
+            <p>No active response containment actions executed for this incident yet.</p>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => handleOpenContainmentModal()}
+            >
+              Execute Defensive Action
+            </button>
+          </div>
+        ) : (
+          <div className="table-responsive">
+            <table className="alerts-table">
+              <thead>
+                <tr>
+                  <th>Action ID</th>
+                  <th>Command</th>
+                  <th>Target Type</th>
+                  <th>Target Value</th>
+                  <th>Status</th>
+                  <th>Executed At</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {responseActions.map((action) => (
+                  <tr key={action.id}>
+                    <td className="mono">#{action.id}</td>
+                    <td>
+                      <span className="mono mono-strong">{action.command}</span>
+                    </td>
+                    <td>
+                      <span className="evidence-type-badge">{action.target_type.toUpperCase()}</span>
+                    </td>
+                    <td className="mono">{action.target_value}</td>
+                    <td>
+                      <span className={`status-badge status-${action.status}`}>
+                        {action.status}
+                      </span>
+                    </td>
+                    <td>{formatTs(action.created_at)}</td>
+                    <td className="cell-actions">
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-secondary"
+                        onClick={() => setSelectedActionDetail(action)}
+                      >
+                        View Output
                       </button>
                     </td>
                   </tr>
@@ -988,7 +1178,9 @@ export default function CaseDetail() {
 
               // Determine audit tag
               let auditBadge = null
-              if (note.content.startsWith('[Case Assignment]')) {
+              if (note.content.startsWith('[Active Response]')) {
+                auditBadge = <span className="role-badge note-tag-response">🛡️ Active Response</span>
+              } else if (note.content.startsWith('[Case Assignment]')) {
                 auditBadge = <span className="role-badge note-tag-assignment">👤 Assignment</span>
               } else if (note.content.startsWith('[Evidence')) {
                 auditBadge = <span className="role-badge note-tag-evidence">📌 Evidence Locker</span>
@@ -1434,6 +1626,178 @@ export default function CaseDetail() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Active Response Containment Modal */}
+      {showContainmentModal && (
+        <div className="modal-backdrop">
+          <div className="modal-box modal-box--large">
+            <div className="modal-header">
+              <h3>🛡️ Execute Defensive Active Response</h3>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setShowContainmentModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            {containmentModalError && <ErrorBanner message={containmentModalError} />}
+            <form onSubmit={handleExecuteContainment}>
+              <div className="form-group">
+                <label htmlFor="response-cmd">Defensive Command</label>
+                <select
+                  id="response-cmd"
+                  value={containmentCommand}
+                  onChange={(e) => handleCommandChange(e.target.value)}
+                >
+                  {approvedCommands.length > 0 ? (
+                    approvedCommands.map((cmd) => (
+                      <option key={cmd.command} value={cmd.command}>
+                        {cmd.name} ({cmd.risk_level.toUpperCase()})
+                      </option>
+                    ))
+                  ) : (
+                    <>
+                      <option value="firewall-drop">Block IP (Firewall Drop)</option>
+                      <option value="host-deny">Deny Host (TCP Wrappers)</option>
+                      <option value="isolate-host">Isolate Endpoint (Network Quarantine)</option>
+                      <option value="restart-wazuh">Restart Wazuh Agent</option>
+                    </>
+                  )}
+                </select>
+              </div>
+
+              {/* Command Details & Warning Banner */}
+              {(() => {
+                const currentCmd = approvedCommands.find((c) => c.command === containmentCommand)
+                return (
+                  <div className="containment-warning-box">
+                    <strong>⚠️ Caution: </strong>
+                    {currentCmd?.warning || 'Defensive host response commands may impact network connectivity or daemon execution on the target.'}
+                  </div>
+                )
+              })()}
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="target-type">Target Type</label>
+                  <select
+                    id="target-type"
+                    value={containmentTargetType}
+                    onChange={(e) => setContainmentTargetType(e.target.value as 'ip' | 'agent')}
+                  >
+                    <option value="ip">IP Address</option>
+                    <option value="agent">Wazuh Agent ID</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="target-value">
+                    {containmentTargetType === 'ip' ? 'Target IP Address' : 'Target Agent Identifier'}
+                  </label>
+                  <input
+                    id="target-value"
+                    type="text"
+                    required
+                    placeholder={containmentTargetType === 'ip' ? 'e.g. 198.51.100.77' : 'e.g. 001'}
+                    value={containmentTargetValue}
+                    onChange={(e) => setContainmentTargetValue(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {containmentTargetType === 'ip' && (
+                <div className="form-group">
+                  <label htmlFor="agent-id">Host Agent ID (Optional, leave blank for all active hosts)</label>
+                  <input
+                    id="agent-id"
+                    type="text"
+                    placeholder="e.g. 000, 001 (or leave blank)"
+                    value={containmentAgentId}
+                    onChange={(e) => setContainmentAgentId(e.target.value)}
+                  />
+                </div>
+              )}
+
+              {/* Human-in-the-loop confirmation */}
+              <label className="containment-confirm-check">
+                <input
+                  type="checkbox"
+                  checked={containmentConfirmed}
+                  onChange={(e) => setContainmentConfirmed(e.target.checked)}
+                />
+                <span>
+                  I confirm execution of defensive command <strong>{containmentCommand}</strong> against target{' '}
+                  <code className="mono">{containmentTargetValue || '[specify target]'}</code>.
+                </span>
+              </label>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowContainmentModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-danger"
+                  disabled={executingContainment || !containmentConfirmed || !containmentTargetValue.trim()}
+                >
+                  {executingContainment ? 'Executing Containment…' : 'Execute Containment'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Action Output Detail Modal */}
+      {selectedActionDetail && (
+        <div className="modal-backdrop">
+          <div className="modal-box modal-box--large">
+            <div className="modal-header">
+              <h3>Response Action #{selectedActionDetail.id} Output</h3>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setSelectedActionDetail(null)}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="meta-list" style={{ marginBottom: '1rem' }}>
+              <div><dt>Command</dt><dd className="mono">{selectedActionDetail.command}</dd></div>
+              <div><dt>Target</dt><dd className="mono">{selectedActionDetail.target_type.toUpperCase()}: {selectedActionDetail.target_value}</dd></div>
+              <div><dt>Status</dt><dd><span className={`status-badge status-${selectedActionDetail.status}`}>{selectedActionDetail.status}</span></dd></div>
+              <div><dt>Timestamp</dt><dd>{formatTs(selectedActionDetail.created_at)}</dd></div>
+            </div>
+
+            {selectedActionDetail.error_message && (
+              <div className="error-banner" style={{ marginBottom: '1rem' }}>
+                {selectedActionDetail.error_message}
+              </div>
+            )}
+
+            <div className="form-group">
+              <label>Raw Execution Output</label>
+              <pre className="response-output-pre">
+                {JSON.stringify(selectedActionDetail.execution_output, null, 2) || 'No output payload recorded.'}
+              </pre>
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setSelectedActionDetail(null)}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

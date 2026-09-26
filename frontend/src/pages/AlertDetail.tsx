@@ -2,11 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   addCaseEvidence,
+  executeActiveResponse,
   fetchAlertById,
+  fetchApprovedCommands,
   fetchCases,
   getAlertEnrichment,
   type AlertDetailOut,
   type AlertEnrichmentResponse,
+  type ApprovedCommand,
   type CaseOut,
   type IOCIndicator,
   NotFoundError,
@@ -67,6 +70,21 @@ export default function AlertDetail() {
   const [recentCases, setRecentCases] = useState<CaseOut[]>([])
   const [promoting, setPromoting] = useState(false)
   const [promoteError, setPromoteError] = useState<string | null>(null)
+
+  // Active Response Containment State
+  const [approvedCommands, setApprovedCommands] = useState<ApprovedCommand[]>([])
+  const [showContainmentModal, setShowContainmentModal] = useState(false)
+  const [containmentCommand, setContainmentCommand] = useState<string>('isolate-host')
+  const [containmentTargetType, setContainmentTargetType] = useState<'ip' | 'agent'>('agent')
+  const [containmentTargetValue, setContainmentTargetValue] = useState<string>('')
+  const [containmentAgentId, setContainmentAgentId] = useState<string>('')
+  const [containmentConfirmed, setContainmentConfirmed] = useState(false)
+  const [executingContainment, setExecutingContainment] = useState(false)
+  const [containmentModalError, setContainmentModalError] = useState<string | null>(null)
+
+  useEffect(() => {
+    void fetchApprovedCommands().then(setApprovedCommands).catch(() => {})
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -202,6 +220,58 @@ export default function AlertDetail() {
     }
   }
 
+  function handleOpenContainmentModal(
+    command: string,
+    targetType: 'ip' | 'agent',
+    targetValue: string,
+    agentId?: string,
+  ) {
+    setContainmentCommand(command)
+    setContainmentTargetType(targetType)
+    setContainmentTargetValue(targetValue)
+    setContainmentAgentId(agentId ?? (targetType === 'agent' ? targetValue : ''))
+    setContainmentConfirmed(false)
+    setContainmentModalError(null)
+    setShowContainmentModal(true)
+  }
+
+  function handleCommandChange(cmd: string) {
+    setContainmentCommand(cmd)
+    const matchingCmd = approvedCommands.find((c) => c.command === cmd)
+    if (matchingCmd) {
+      setContainmentTargetType(matchingCmd.target_type)
+    }
+  }
+
+  async function handleExecuteContainment(e: React.FormEvent) {
+    e.preventDefault()
+    if (!alert) return
+    if (!containmentConfirmed) {
+      setContainmentModalError('Please explicitly confirm the containment action before executing.')
+      return
+    }
+    setExecutingContainment(true)
+    setContainmentModalError(null)
+    try {
+      const action = await executeActiveResponse({
+        command: containmentCommand,
+        target_type: containmentTargetType,
+        target_value: containmentTargetValue.trim(),
+        agent_id: containmentTargetType === 'ip' && containmentAgentId.trim() ? containmentAgentId.trim() : undefined,
+        alert_id: alert.id,
+      })
+      setShowContainmentModal(false)
+      setActionSuccess({
+        msg: `Active response ${action.status}: ${action.command} on target ${action.target_value}.`,
+      })
+      setTimeout(() => setActionSuccess(null), 5000)
+    } catch (err) {
+      setContainmentModalError(String(err))
+    } finally {
+      setExecutingContainment(false)
+    }
+  }
+
   if (loading) return <Spinner label="Loading alert detail…" />
   if (error) return (
     <div className="page">
@@ -223,6 +293,24 @@ export default function AlertDetail() {
           <h1 className="page-title">{alert.description ?? `Alert #${alert.id}`}</h1>
         </div>
         <div className="header-actions">
+          {alert.agent_id && (
+            <button
+              type="button"
+              className="btn btn-danger"
+              onClick={() => handleOpenContainmentModal('isolate-host', 'agent', alert.agent_id!)}
+            >
+              🔒 Contain Agent ({alert.agent_id})
+            </button>
+          )}
+          {alert.src_ip && (
+            <button
+              type="button"
+              className="btn btn-warning"
+              onClick={() => handleOpenContainmentModal('firewall-drop', 'ip', alert.src_ip!, alert.agent_id ?? undefined)}
+            >
+              🛡️ Block Source IP ({alert.src_ip})
+            </button>
+          )}
           <Link
             to={`/cases/new?alert_id=${alert.id}`}
             className="btn btn-primary"
@@ -586,6 +674,131 @@ export default function AlertDetail() {
                   disabled={promoting || !promoteCaseId}
                 >
                   {promoting ? 'Promoting…' : 'Promote to Evidence'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Active Response Containment Modal */}
+      {showContainmentModal && (
+        <div className="modal-backdrop">
+          <div className="modal-box modal-box--large">
+            <div className="modal-header">
+              <h3>🛡️ Execute Defensive Active Response</h3>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setShowContainmentModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            {containmentModalError && <ErrorBanner message={containmentModalError} />}
+            <form onSubmit={handleExecuteContainment}>
+              <div className="form-group">
+                <label htmlFor="response-cmd">Defensive Command</label>
+                <select
+                  id="response-cmd"
+                  value={containmentCommand}
+                  onChange={(e) => handleCommandChange(e.target.value)}
+                >
+                  {approvedCommands.length > 0 ? (
+                    approvedCommands.map((cmd) => (
+                      <option key={cmd.command} value={cmd.command}>
+                        {cmd.name} ({cmd.risk_level.toUpperCase()})
+                      </option>
+                    ))
+                  ) : (
+                    <>
+                      <option value="isolate-host">Isolate Endpoint (Network Quarantine)</option>
+                      <option value="firewall-drop">Block IP (Firewall Drop)</option>
+                      <option value="host-deny">Deny Host (TCP Wrappers)</option>
+                      <option value="restart-wazuh">Restart Wazuh Agent</option>
+                    </>
+                  )}
+                </select>
+              </div>
+
+              {/* Command Details & Warning Banner */}
+              {(() => {
+                const currentCmd = approvedCommands.find((c) => c.command === containmentCommand)
+                return (
+                  <div className="containment-warning-box">
+                    <strong>⚠️ Caution: </strong>
+                    {currentCmd?.warning || 'Defensive host response commands may impact network connectivity or daemon execution on the target.'}
+                  </div>
+                )
+              })()}
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="target-type">Target Type</label>
+                  <select
+                    id="target-type"
+                    value={containmentTargetType}
+                    onChange={(e) => setContainmentTargetType(e.target.value as 'ip' | 'agent')}
+                  >
+                    <option value="agent">Wazuh Agent ID</option>
+                    <option value="ip">IP Address</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="target-value">
+                    {containmentTargetType === 'ip' ? 'Target IP Address' : 'Target Agent Identifier'}
+                  </label>
+                  <input
+                    id="target-value"
+                    type="text"
+                    required
+                    placeholder={containmentTargetType === 'ip' ? 'e.g. 198.51.100.77' : 'e.g. 001'}
+                    value={containmentTargetValue}
+                    onChange={(e) => setContainmentTargetValue(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {containmentTargetType === 'ip' && (
+                <div className="form-group">
+                  <label htmlFor="agent-id">Host Agent ID (Optional, leave blank for all active hosts)</label>
+                  <input
+                    id="agent-id"
+                    type="text"
+                    placeholder="e.g. 000, 001 (or leave blank)"
+                    value={containmentAgentId}
+                    onChange={(e) => setContainmentAgentId(e.target.value)}
+                  />
+                </div>
+              )}
+
+              {/* Human-in-the-loop confirmation */}
+              <label className="containment-confirm-check">
+                <input
+                  type="checkbox"
+                  checked={containmentConfirmed}
+                  onChange={(e) => setContainmentConfirmed(e.target.checked)}
+                />
+                <span>
+                  I confirm execution of defensive command <strong>{containmentCommand}</strong> against target{' '}
+                  <code className="mono">{containmentTargetValue || '[specify target]'}</code>.
+                </span>
+              </label>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowContainmentModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-danger"
+                  disabled={executingContainment || !containmentConfirmed || !containmentTargetValue.trim()}
+                >
+                  {executingContainment ? 'Executing Containment…' : 'Execute Containment'}
                 </button>
               </div>
             </form>

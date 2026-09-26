@@ -2647,3 +2647,103 @@ dd[data-state='loading'] {
   color: #8b98a5;
   border: 1px solid rgba(139, 152, 165, 0.35);
 }
+
+.note-tag-response {
+  background: rgba(248, 81, 73, 0.18);
+  color: #ff7b72;
+  border: 1px solid rgba(248, 81, 73, 0.35);
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-badge.status-succeeded {
+  background: rgba(61, 214, 140, 0.15);
+  color: #3dd68c;
+  border: 1px solid rgba(61, 214, 140, 0.3);
+}
+
+.status-badge.status-failed {
+  background: rgba(248, 81, 73, 0.15);
+  color: #ff7b72;
+  border: 1px solid rgba(248, 81, 73, 0.3);
+}
+
+.status-badge.status-executing {
+  background: rgba(230, 192, 123, 0.15);
+  color: #e6c07b;
+  border: 1px solid rgba(230, 192, 123, 0.3);
+}
+
+.status-badge.status-pending {
+  background: rgba(139, 152, 165, 0.15);
+  color: #8b98a5;
+  border: 1px solid rgba(139, 152, 165, 0.3);
+}
+
+.btn-warning {
+  background: #d29922;
+  color: #0d1117;
+  border: 1px solid rgba(240, 246, 252, 0.1);
+  padding: 0.45rem 1rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: #e3b341;
+}
+
+.btn-warning:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.containment-warning-box {
+  background: rgba(248, 81, 73, 0.1);
+  border: 1px solid rgba(248, 81, 73, 0.4);
+  border-radius: 6px;
+  padding: 0.85rem 1rem;
+  color: #ff7b72;
+  font-size: 0.88rem;
+  line-height: 1.4;
+  margin-bottom: 1.25rem;
+}
+
+.containment-confirm-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin-top: 1rem;
+  font-size: 0.88rem;
+  color: #c9d1d9;
+  cursor: pointer;
+}
+
+.containment-confirm-check input[type="checkbox"] {
+  margin-top: 0.2rem;
+}
+
+.response-output-pre {
+  background: #0f1419;
+  border: 1px solid #2d3a4d;
+  border-radius: 6px;
+  padding: 0.75rem;
+  font-family: monospace;
+  font-size: 0.82rem;
+  color: #79c0ff;
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

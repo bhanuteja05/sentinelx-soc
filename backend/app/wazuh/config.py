@@ -23,6 +23,13 @@ class WazuhSettings:
     ingest_enabled: bool = True
     ingest_interval_seconds: float = 30.0
     ingest_batch_size: int = 50
+    response_enabled: bool = False
+    response_protected_targets: tuple[str, ...] = (
+        "127.0.0.1",
+        "::1",
+        "localhost",
+        "0.0.0.0",
+    )
 
     def redact(self, text: str) -> str:
         """Redact known credentials from strings before logging or raising."""
@@ -67,6 +74,17 @@ def get_wazuh_settings() -> WazuhSettings:
     except ValueError:
         ingest_batch_size = 50
 
+    resp_enabled_raw = os.getenv("RESPONSE_ENABLED", "false").strip().lower()
+    response_enabled = resp_enabled_raw in ("1", "true", "yes")
+
+    custom_protected = [
+        t.strip().lower()
+        for t in os.getenv("RESPONSE_PROTECTED_TARGETS", "").split(",")
+        if t.strip()
+    ]
+    default_protected = ["127.0.0.1", "::1", "localhost", "0.0.0.0"]
+    all_protected = tuple(sorted(set(default_protected + custom_protected)))
+
     return WazuhSettings(
         api_url=api_url,
         api_user=api_user,
@@ -79,4 +97,6 @@ def get_wazuh_settings() -> WazuhSettings:
         ingest_enabled=ingest_enabled,
         ingest_interval_seconds=ingest_interval_seconds,
         ingest_batch_size=ingest_batch_size,
+        response_enabled=response_enabled,
+        response_protected_targets=all_protected,
     )

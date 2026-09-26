@@ -182,5 +182,25 @@ class WazuhClient:
             alerts=alerts,
         )
 
+    def execute_active_response(
+        self,
+        command: str,
+        arguments: list[str] | None = None,
+        agents_list: list[str] | None = None,
+        alert_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Execute Wazuh active response command on specified agent(s)."""
+        payload: dict[str, Any] = {"command": command}
+        if arguments:
+            payload["arguments"] = arguments
+        if alert_data:
+            payload["alert"] = {"data": alert_data}
+
+        params: dict[str, str] = {}
+        if agents_list:
+            params["agents_list"] = ",".join(agents_list)
+
+        return self._request("PUT", "/active-response", json=payload, params=params)
+
 
 wazuh_client = WazuhClient()

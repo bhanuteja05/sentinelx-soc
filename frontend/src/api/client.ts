@@ -938,3 +938,91 @@ export async function evaluateTriageBacklog(limit = 100): Promise<TriageEvaluati
     body: JSON.stringify({ limit }),
   })
 }
+
+// ── Active Response & Defensive Containment ──────────────────────────────────
+
+export type ApprovedCommand = {
+  command: string
+  name: string
+  description: string
+  target_type: 'ip' | 'agent'
+  risk_level: string
+  requires_agent_id: boolean
+  wazuh_command: string
+  warning: string
+}
+
+export type ResponseAction = {
+  id: number
+  case_id: number | null
+  alert_id: number | null
+  action_type: string
+  command: string
+  target_type: string
+  target_value: string
+  parameters: Record<string, unknown>
+  status: string
+  execution_output: Record<string, unknown> | null
+  error_message: string | null
+  executed_by_id: number | null
+  created_at: string
+  completed_at: string | null
+}
+
+export type PaginatedResponseActions = {
+  items: ResponseAction[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
+export type ExecuteResponsePayload = {
+  command: string
+  target_type: string
+  target_value: string
+  agent_id?: string | null
+  case_id?: number | null
+  alert_id?: number | null
+  parameters?: Record<string, unknown>
+}
+
+export async function fetchApprovedCommands(): Promise<ApprovedCommand[]> {
+  return apiFetch<ApprovedCommand[]>('/api/v1/response/commands')
+}
+
+export async function executeActiveResponse(
+  payload: ExecuteResponsePayload,
+): Promise<ResponseAction> {
+  return apiFetch<ResponseAction>('/api/v1/response/execute', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function fetchResponseActions(params?: {
+  page?: number
+  page_size?: number
+  case_id?: number
+  alert_id?: number
+  agent_id?: string
+  status?: string
+  command?: string
+  target_type?: string
+}): Promise<PaginatedResponseActions> {
+  const query = new URLSearchParams()
+  if (params?.page) query.set('page', String(params.page))
+  if (params?.page_size) query.set('page_size', String(params.page_size))
+  if (params?.case_id) query.set('case_id', String(params.case_id))
+  if (params?.alert_id) query.set('alert_id', String(params.alert_id))
+  if (params?.agent_id) query.set('agent_id', params.agent_id)
+  if (params?.status) query.set('status', params.status)
+  if (params?.command) query.set('command', params.command)
+  if (params?.target_type) query.set('target_type', params.target_type)
+  const qs = query.toString()
+  return apiFetch<PaginatedResponseActions>(`/api/v1/response/actions${qs ? `?${qs}` : ''}`)
+}
+
+export async function fetchResponseActionDetail(actionId: number): Promise<ResponseAction> {
+  return apiFetch<ResponseAction>(`/api/v1/response/actions/${actionId}`)
+}

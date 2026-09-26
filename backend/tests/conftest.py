@@ -51,6 +51,6 @@ def db_session(engine) -> Generator[Session, None, None]:
 
 @pytest.fixture
 def clean_db(db_session: Session) -> Session:
-    db_session.execute(text("TRUNCATE TABLE users, alerts, cases, case_alerts, case_notes, triage_rules, case_evidence RESTART IDENTITY CASCADE"))
+    db_session.execute(text("TRUNCATE TABLE users, alerts, cases, case_alerts, case_notes, triage_rules, case_evidence, response_actions RESTART IDENTITY CASCADE"))
     db_session.commit()
     return db_session
